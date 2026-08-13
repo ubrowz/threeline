@@ -12,3 +12,7 @@ Two files, no build step, no dependencies:
 
 The editor is self-contained and works offline. Transcriptions are saved as
 plain `.json` on your own machine; nothing is uploaded anywhere.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE). Use it, change it, pass it on.
