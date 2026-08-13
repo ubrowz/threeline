@@ -1,0 +1,2651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bass Notation Editor</title>
+<style>
+  :root{
+    --bg:#eceef1;
+    --panel:#ffffff;
+    --panel-2:#f6f7f9;
+    --line:#d8dbe0;
+    --ink:#1b1d21;
+    --ink-2:#5c626c;
+    --accent:#2f6fd0;
+    --accent-soft:#e4edfb;
+    --sel:#fff2c9;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  button,input,select{font:inherit;color:inherit}
+
+  /* ---------- shell ---------- */
+  .app{display:flex;flex-direction:column;height:100vh}
+  .topbar{
+    display:flex;align-items:center;gap:8px;
+    padding:8px 12px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex:0 0 auto;
+  }
+  .brand{font-weight:650;letter-spacing:-.01em;margin-right:6px;white-space:nowrap}
+  .brand span{color:var(--ink-2);font-weight:400}
+  .spacer{flex:1}
+  .btn{
+    border:1px solid var(--line);background:var(--panel);border-radius:7px;
+    padding:5px 11px;cursor:pointer;white-space:nowrap;
+  }
+  .btn:hover{background:var(--panel-2)}
+  .btn:active{transform:translateY(1px)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{filter:brightness(1.07)}
+  .btn.on{background:var(--accent-soft);border-color:#b7cdf0;color:#1d4f9c}
+
+  .main{display:flex;flex:1;min-height:0}
+
+  /* ---------- score area ---------- */
+  .scrollarea{flex:1;overflow:auto;padding:26px 20px 120px;min-width:0}
+  .page{
+    width:820px;margin:0 auto;background:#fff;
+    box-shadow:0 1px 3px rgba(0,0,0,.13),0 10px 30px rgba(0,0,0,.07);
+    border-radius:3px;padding:44px 40px 52px;
+  }
+  .songhead{margin:0 0 26px;text-align:center}
+  .songhead .t{font-size:23px;font-weight:650;letter-spacing:-.02em}
+  .songhead .a{font-size:13px;color:var(--ink-2);margin-top:2px}
+  .section{margin:0 0 26px}
+  .sectionhead{
+    font-size:13.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+    color:#33383f;border:1px solid transparent;border-radius:5px;
+    padding:2px 5px;margin:0 0 4px -5px;width:100%;background:transparent;
+    display:block;
+  }
+  .sectionhead:hover{border-color:var(--line)}
+  .sectionhead:focus{outline:none;border-color:var(--accent);background:#fff}
+  .system{display:block;break-inside:avoid;page-break-inside:avoid}
+  .section.ref{break-inside:avoid;page-break-inside:avoid}
+  .reftag{
+    display:block;margin:-3px 0 0 -5px;font-size:10px;font-weight:600;
+    letter-spacing:.09em;text-transform:uppercase;color:#a6adb7;
+  }
+  @media print{ .reftag{display:none} }
+
+  /* A manual page break. On screen it is only a marker; the actual break
+     happens when printing. */
+  .pagebreak{break-before:page;page-break-before:always;margin-top:38px;position:relative}
+  .pagebreak::before{
+    content:"page break";
+    position:absolute;left:0;right:0;top:-23px;
+    border-top:1px dashed #b4bcc6;padding-top:4px;text-align:right;
+    font-size:10px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+    color:#9aa2ad;pointer-events:none;
+  }
+  .system svg{display:block;overflow:visible}
+  .system .hit{fill:transparent;cursor:pointer}
+  .system .hit:hover{fill:rgba(47,111,208,.07)}
+  .system .hit.playing{fill:rgba(47,111,208,.20)}
+  @media print{ .system .hit.playing{fill:transparent} }
+  .system .hitstr:hover{fill:rgba(47,111,208,.14)}
+
+  /* ---------- sidebar ---------- */
+  .sidebar{
+    width:308px;flex:0 0 308px;background:var(--panel);
+    border-left:1px solid var(--line);overflow:auto;padding:14px 14px 60px;
+  }
+  .card{border:1px solid var(--line);border-radius:9px;padding:11px;margin-bottom:12px;background:var(--panel)}
+  .card h3{
+    margin:0 0 9px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--ink-2);font-weight:650;
+  }
+  .row{display:flex;gap:6px;align-items:center;margin-bottom:7px}
+  .row:last-child{margin-bottom:0}
+  .row label{width:74px;flex:0 0 74px;color:var(--ink-2);font-size:12.5px}
+  .fld{
+    flex:1;min-width:0;border:1px solid var(--line);border-radius:6px;
+    padding:4px 7px;background:#fff;
+  }
+  .fld:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+  textarea.fld{width:100%;resize:vertical;line-height:1.5;font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12.5px}
+  .grid{display:flex;gap:5px;flex-wrap:wrap}
+  .grid .btn{padding:5px 0;flex:1;min-width:42px;text-align:center}
+  .glyphbtn{font-size:17px;line-height:1}
+  .muted{color:var(--ink-2);font-size:12px}
+  .empty{color:var(--ink-2);font-size:12.5px;font-style:italic}
+
+  .seclist{display:flex;flex-direction:column;gap:5px}
+  .secitem{display:flex;gap:4px;align-items:center}
+  .secitem .fld{padding:3px 6px;font-size:12.5px}
+  .secitem.active .fld{border-color:var(--accent);background:var(--accent-soft)}
+  .mini{
+    border:1px solid var(--line);background:#fff;border-radius:5px;
+    width:24px;height:24px;flex:0 0 24px;cursor:pointer;color:var(--ink-2);
+    display:flex;align-items:center;justify-content:center;font-size:12px;padding:0;
+  }
+  .mini:hover{background:var(--panel-2);color:var(--ink)}
+  .mini.on{background:var(--accent-soft);border-color:#b7cdf0;color:#1d4f9c;font-weight:700}
+
+  kbd{
+    display:inline-block;min-width:17px;text-align:center;
+    border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;
+    padding:0 4px;background:var(--panel-2);font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  .keys{display:grid;grid-template-columns:auto 1fr;gap:5px 9px;align-items:center;font-size:12.5px}
+  .keys div:nth-child(even){color:var(--ink-2)}
+
+  .statusbar{
+    flex:0 0 auto;border-top:1px solid var(--line);background:var(--panel);
+    padding:5px 12px;font-size:12px;color:var(--ink-2);display:flex;gap:14px;align-items:center;
+  }
+  .statusbar b{color:var(--ink);font-weight:600}
+
+  /* ---------- print ---------- */
+  @media print{
+    body{background:#fff}
+    .topbar,.sidebar,.statusbar{display:none !important}
+    .main,.app{display:block;height:auto}
+    .scrollarea{overflow:visible;padding:0}
+    .page{width:auto;box-shadow:none;padding:0;margin:0;border-radius:0}
+    .sectionhead{border-color:transparent !important}
+    .pagebreak{margin-top:0}
+    .pagebreak::before{display:none}
+    .system .sel{display:none}
+    .system .selbg{fill:#fff}
+    @page{margin:16mm 12mm}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="topbar">
+    <div class="brand">Bass Notation <span>· editor</span></div>
+    <button class="btn" id="btnNew">New</button>
+    <button class="btn" id="btnOpen">Open…</button>
+    <button class="btn primary" id="btnSave">Save</button>
+    <button class="btn" id="btnPrint">Print / PDF</button>
+    <span style="width:10px"></span>
+    <button class="btn" id="btnPlay" title="Play from the selected note, or play the selection (⌘↵)">Play</button>
+    <button class="btn" id="btnLoop" title="Repeat what you are playing until you stop (⌘L)">Loop</button>
+    <select class="btn" id="fRate" title="Practice tempo, as a percentage of the song tempo" style="padding:5px 6px">
+      <option value="100">100%</option>
+      <option value="90">90%</option>
+      <option value="80">80%</option>
+      <option value="70">70%</option>
+      <option value="60">60%</option>
+      <option value="50">50%</option>
+      <option value="40">40%</option>
+    </select>
+    <div class="spacer"></div>
+    <span class="muted" id="saveState"></span>
+    <button class="btn" id="btnUndo" title="Undo (⌘Z)">Undo</button>
+    <button class="btn" id="btnRedo" title="Redo (⇧⌘Z)">Redo</button>
+    <input type="file" id="fileInput" accept=".json,application/json" hidden>
+  </div>
+
+  <div class="main">
+    <div class="scrollarea" id="scrollarea">
+      <div class="page" id="page"></div>
+    </div>
+
+    <div class="sidebar">
+
+      <div class="card">
+        <h3>Song</h3>
+        <div class="row"><label>Title</label><input class="fld" id="fTitle" placeholder="Untitled"></div>
+        <div class="row"><label>Artist</label><input class="fld" id="fArtist" placeholder=""></div>
+        <div class="row"><label>Tempo</label>
+          <input class="fld" type="number" id="fTempo" min="30" max="300" step="1" style="flex:0 0 72px">
+          <span class="muted">bpm</span>
+        </div>
+        <div class="row"><label>Repeats</label>
+          <input type="checkbox" id="fRepeats" style="flex:0 0 auto;margin:0 6px 0 0">
+          <span class="muted">follow when playing</span>
+        </div>
+        <div class="row"><label>Time</label>
+          <select class="fld" id="fTime">
+            <option value="4/4">4/4</option>
+            <option value="3/4">3/4</option>
+            <option value="2/4">2/4</option>
+            <option value="5/4">5/4</option>
+            <option value="6/8">6/8</option>
+            <option value="12/8">12/8</option>
+          </select>
+        </div>
+        <div class="row"><label>Note names</label>
+          <select class="fld" id="fNaming">
+            <option value="nl">Dutch — Fis, Cis, Bes</option>
+            <option value="en">English — F#, C#, Bb</option>
+          </select>
+        </div>
+        <div class="row"><label>Bars / line</label>
+          <select class="fld" id="fBars">
+            <option value="auto">auto (fit the width)</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="6">6</option>
+            <option value="8">8</option>
+          </select>
+        </div>
+        <div class="row"><label>Octaves</label>
+          <select class="fld" id="fOct">
+            <option value="off">off</option>
+            <option value="spn">scientific — open E = E1</option>
+            <option value="yamaha">Yamaha — open E = E0</option>
+            <option value="written">as written — open E = E2</option>
+            <option value="helmholtz">Helmholtz — open E = E,</option>
+          </select>
+        </div>
+        <div class="muted" id="octHint" style="margin-top:6px"></div>
+      </div>
+
+      <div class="card">
+        <h3>Chord sketch</h3>
+        <textarea class="fld" id="fSketch" rows="4" spellcheck="false"
+          placeholder="[Verse] Am | C | G | Dm&#10;[Chorus] F | G | Am | Am"></textarea>
+        <div style="margin-top:8px"><button class="btn" id="btnSketch" style="width:100%">Add these bars</button></div>
+        <div class="muted" style="margin-top:6px">A bar per line, or per <b>|</b>. Several chords in one bar split it between them. <b>[Name]</b> starts a section. The bars arrive empty — type frets over the rests afterwards.</div>
+      </div>
+
+      <div class="card">
+        <h3>Note</h3>
+        <div id="inspector"></div>
+      </div>
+
+      <div class="card">
+        <h3>Bar</h3>
+        <div class="grid">
+          <button class="btn" id="btnInsMeasure" title="Insert an empty bar after this one (i)">Insert</button>
+          <button class="btn" id="btnAddMeasure" title="Add an empty bar at the end (m)">Append</button>
+          <button class="btn" id="btnDelMeasure" title="Delete the bar the cursor is in (⇧M)">Delete</button>
+        </div>
+        <div class="muted" style="margin-top:7px">Insert drops an empty bar after the one you’re in and shifts the rest right. New bars arrive as rests — type frets over them.</div>
+      </div>
+
+      <div class="card">
+        <h3>Sections</h3>
+        <div class="seclist" id="seclist"></div>
+        <div class="grid" style="margin-top:8px">
+          <button class="btn" id="btnSplitSection" title="Start a new section after the selected note (⇧S)">Split here</button>
+          <button class="btn" id="btnAddSection" title="Add an empty section at the end">+ Section</button>
+          <button class="btn" id="btnAddRef" title="Add a name-only section, for a part that repeats">+ Reference</button>
+        </div>
+        <div class="muted" style="margin-top:7px">A reference shows just its name — use it for a chorus or verse that repeats an earlier one. <b>R</b> turns any section into one; its notes are kept, only hidden.</div>
+      </div>
+
+      <div class="card">
+        <h3>Keyboard</h3>
+        <div class="keys">
+          <div><kbd>0</kbd>–<kbd>9</kbd></div><div>fret number</div>
+          <div><kbd>↑</kbd><kbd>↓</kbd></div><div>string (E A D G)</div>
+          <div><kbd>←</kbd><kbd>→</kbd></div><div>move between notes</div>
+          <div><kbd>space</kbd></div><div>next note</div>
+          <div><kbd>⇧←</kbd> <kbd>⇧→</kbd></div><div>select a range of notes</div>
+          <div><kbd>⌘A</kbd></div><div>select the whole section</div>
+          <div><kbd>⌘C</kbd> <kbd>⌘X</kbd></div><div>copy / cut the selection</div>
+          <div><kbd>⌘V</kbd></div><div>paste after the selection</div>
+          <div><kbd>⌘↵</kbd></div><div>play / stop</div>
+          <div><kbd>⌘L</kbd></div><div>loop what you play</div>
+          <div><kbd>esc</kbd></div><div>stop playing</div>
+          <div><kbd>w</kbd><kbd>h</kbd><kbd>q</kbd><kbd>e</kbd><kbd>s</kbd></div><div>whole · half · quarter · eighth · 16th</div>
+          <div><kbd>.</kbd></div><div>dot</div>
+          <div><kbd>r</kbd></div><div>rest</div>
+          <div><kbd>x</kbd></div><div>dead / ghost note</div>
+          <div><kbd>-</kbd></div><div>hammer / pull → slide → plain</div>
+          <div><kbd>⇧T</kbd></div><div>split into a triplet, or merge one back</div>
+          <div><kbd>t</kbd></div><div>tie to next note</div>
+          <div><kbd>n</kbd></div><div>flip sharp ↔ flat spelling</div>
+          <div><kbd>m</kbd> <kbd>↵</kbd></div><div>add an empty bar</div>
+          <div><kbd>⇧M</kbd></div><div>delete this bar</div>
+          <div><kbd>i</kbd></div><div>insert a bar after this one</div>
+          <div><kbd>⇧S</kbd></div><div>split off a new section here</div>
+          <div><kbd>⇧↵</kbd></div><div>start a new line at this bar</div>
+          <div><kbd>p</kbd></div><div>start a new page at this bar</div>
+          <div><kbd>[</kbd> <kbd>]</kbd></div><div>open / close a repeat</div>
+          <div><kbd>v</kbd></div><div>1st / 2nd time bar</div>
+          <div><kbd>c</kbd></div><div>type a chord name here</div>
+          <div><kbd>l</kbd></div><div>type lyric here</div>
+          <div><kbd>⌫</kbd></div><div>delete note</div>
+          <div><kbd>⌘Z</kbd></div><div>undo</div>
+          <div><kbd>⇧⌘Z</kbd></div><div>redo</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span id="stPos"></span>
+    <span id="stNote"></span>
+    <span class="spacer" style="flex:1"></span>
+    <span id="stHint">Click a note to select it · click a staff line to move it to that string</span>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   Model
+   ============================================================ */
+
+// Strings low → high. 4-string standard tuning.
+const TUNING = [28, 33, 38, 43];            // MIDI: E1 A1 D2 G2
+const STRING_LABEL = ["E", "A", "D", "G"];
+const NSTR = 4;
+
+// Note-name spellings. `def` is what a note gets when you haven't picked an
+// enharmonic by hand; the sharp/flat tables back the `n` key. Both languages
+// default the same way (flat at pitch class 10), so switching language never
+// changes *which* enharmonic is shown — only how it is written.
+const NAMING = {
+  nl: {
+    label: "Dutch (Fis, Bes)",
+    def:   ["C","Cis","D","Dis","E","F","Fis","G","Gis","A","Bes","B"],
+    sharp: ["C","Cis","D","Dis","E","F","Fis","G","Gis","A","Ais","B"],
+    flat:  ["C","Des","D","Es", "E","F","Ges","G","As", "A","Bes","B"]
+  },
+  en: {
+    label: "English (F#, Bb)",
+    def:   ["C","C#","D","D#","E","F","F#","G","G#","A","Bb","B"],
+    sharp: ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"],
+    flat:  ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"]
+  }
+};
+function names(){ return NAMING[song.naming] || NAMING.nl; }
+
+// Duration values in quarter notes.
+const DUR = { w:4, h:2, q:1, e:0.5, s:0.25 };
+const DUR_ORDER = ["w","h","q","e","s"];
+const DUR_LABEL = { w:"whole", h:"half", q:"quarter", e:"eighth", s:"16th" };
+
+const LS_KEY = "bass-notation-v1";
+
+// Octave convention for new transcriptions. Saved files keep whatever they
+// recorded, so changing this never rewrites work you already have.
+const DEFAULT_OCTAVES = "helmholtz";
+
+function newNote(o){
+  return Object.assign({
+    dur:"q", dots:0, rest:false,
+    string:2, fret:0,
+    tie:false,            // tied into the following note
+    dead:false,           // ghost / muted note, drawn as x
+    tup:0,                // 0, or 3 for a member of a triplet
+    link:null,            // null | "legato" (hammer or pull) | "slide", to the next note
+    lyric:"",
+    chord:"",             // chord symbol shown above the rhythm row
+    spell:null,           // null | "sharp" | "flat"
+
+    // Bar-level settings. These live on the first note of a bar, but the UI
+    // lets you toggle them from any note in it — see barAnchor().
+    brk:false,            // start a new line at this bar
+    pageBrk:false,        // start a new printed page at this bar
+    repStart:false,       // |: opens a repeat at this bar
+    repEnd:false,         // :| closes a repeat at the end of this bar
+    repTimes:2,           // how many times to play it, shown as "2x"
+    ending:0              // 0, or 1/2/3… for a 1st/2nd/3rd-time bar
+  }, o||{});
+}
+
+function newSection(heading, ref){
+  // ref: show the name only, no notation — for a chorus or verse that repeats
+  // an earlier one note for note. Any notes are kept, just not drawn.
+  return { heading: heading || "", ref: !!ref, pageBrk: false, notes: [] };
+}
+
+function isRefSection(){
+  const s = curSection();
+  return !!(s && s.ref);
+}
+
+function demoSong(){
+  const s = newSection("Intro");
+  s.notes = [
+    newNote({dur:"h", string:2, fret:4}),
+    newNote({dur:"e", string:1, fret:4}),
+    newNote({dur:"e", string:1, fret:6, tie:true}),
+    newNote({dur:"q", string:1, fret:6}),
+    newNote({dur:"q", string:2, fret:4}),
+    newNote({dur:"q", string:1, fret:4}),
+    newNote({dur:"q", string:1, fret:6}),
+    newNote({dur:"q", rest:true})
+  ];
+  return {
+    version: 1,
+    title: "Untitled",
+    artist: "",
+    timeSig: { beats:4, unit:4 },
+    naming: "nl",
+    tempo: 90,
+    followRepeats: true,
+    barsPerLine: "auto",
+    octaves: DEFAULT_OCTAVES,
+    sections: [s]
+  };
+}
+
+let song = demoSong();
+let cursor = { sec:0, i:0 };                 // i may equal notes.length ("append here")
+let entry  = { dur:"q", dots:0, string:2 };  // defaults for the next note created
+let pendingFret = null;                      // multi-digit fret accumulation
+let selAnchor = null;                        // other end of a multi-note selection
+let undoStack = [], redoStack = [];
+let undoTag = null, undoTagAt = 0;           // see pushUndo()
+
+/* ============================================================
+   Helpers
+   ============================================================ */
+
+const $ = sel => document.querySelector(sel);
+
+// A triplet member lasts two thirds of its written value: three in the time of two.
+function noteBeats(n){
+  const base = DUR[n.dur] * (2 - Math.pow(0.5, n.dots));
+  return n.tup ? base * 2 / n.tup : base;
+}
+
+const SMALLER = { w:"h", h:"q", q:"e", e:"s" };
+const BIGGER  = { h:"w", q:"h", e:"q", s:"e" };
+
+// Consecutive notes carrying the same tuplet mark, chunked into groups of that
+// size. Used both for drawing the bracket and for undoing a triplet.
+function tupletRuns(notes){
+  const runs = [];
+  let i = 0;
+  while (i < notes.length){
+    if (!notes[i].tup){ i++; continue; }
+    const t = notes[i].tup;
+    let j = i;
+    while (j < notes.length && notes[j].tup === t) j++;
+    for (let a = i; a < j; a += t) runs.push({ from: a, to: Math.min(a + t - 1, j - 1), n: t });
+    i = j;
+  }
+  return runs;
+}
+function measureCapacity(){ return song.timeSig.beats * 4 / song.timeSig.unit; }
+function beamUnit(){ return song.timeSig.unit === 8 ? 1.5 : 1; }
+
+function curSection(){ return song.sections[cursor.sec]; }
+function curNotes(){ const s = curSection(); return s ? s.notes : []; }
+function curNote(){ const ns = curNotes(); return cursor.i < ns.length ? ns[cursor.i] : null; }
+
+// A selection runs between the anchor and the cursor, always inside one section.
+function selRange(){
+  const ns = curNotes();
+  if (selAnchor === null || !ns.length) return null;
+  const a = Math.min(selAnchor, cursor.i), b = Math.max(selAnchor, cursor.i);
+  const from = Math.max(0, a), to = Math.min(b, ns.length - 1);
+  return to > from ? { sec: cursor.sec, from, to } : null;
+}
+
+function inSelection(si, i){
+  const r = selRange();
+  return r ? (si === r.sec && i >= r.from && i <= r.to)
+           : (si === cursor.sec && i === cursor.i);
+}
+
+function selCount(){
+  const r = selRange();
+  return r ? r.to - r.from + 1 : (curNote() ? 1 : 0);
+}
+
+function selectSection(){
+  const ns = curNotes();
+  if (!ns.length) return;
+  selAnchor = 0;
+  cursor.i = ns.length - 1;
+  render();
+}
+
+// A note that is the tail of a tie shows no fret number and no name.
+function isTiedInto(notes, i){ return i > 0 && notes[i-1].tie && !notes[i].rest && !notes[i-1].rest; }
+
+function midiOf(n){ return TUNING[n.string] + n.fret; }
+
+function nameOf(n){
+  const m = midiOf(n), pc = ((m % 12) + 12) % 12;
+  const t = names();
+  const table = n.spell === "sharp" ? t.sharp : n.spell === "flat" ? t.flat : t.def;
+  let s = table[pc];
+
+  // Octave numbers roll over at C, not at the bottom of the instrument — so the
+  // lowest Cis on a bass (MIDI 37, nine semitones above the open E) already sits
+  // in the second octave. `spn` is scientific pitch notation, middle C = C4.
+  const spn = Math.floor(m / 12) - 1;
+  switch (song.octaves){
+    case "spn":     s += spn;     break;
+    case "yamaha":  s += spn - 1; break;   // middle C = C3
+    case "written": s += spn + 1; break;   // bass sounds an octave below the staff
+    case "helmholtz":                       // grote C / kleine c / c'
+      s = spn <= 2 ? s + ",".repeat(2 - spn)
+                   : s.toLowerCase() + "'".repeat(spn - 3);
+      break;
+  }
+  return s;
+}
+
+function hasAltSpelling(n){
+  const pc = ((midiOf(n) % 12) + 12) % 12;
+  const t = names();
+  return t.sharp[pc] !== t.flat[pc];
+}
+
+function esc(s){
+  return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+
+// Text measuring, for note spacing.
+const _mc = document.createElement("canvas").getContext("2d");
+function textW(str, font){ _mc.font = font; return _mc.measureText(str).width; }
+
+function snapshot(){ return JSON.stringify(song); }
+
+// Tags are scoped to the note being edited, so moving to another note and
+// typing there starts a new undo step rather than joining the previous one.
+function tagFor(name){ return `${name}:${cursor.sec}:${cursor.i}`; }
+
+// `tag` coalesces a burst of edits to the same field into one undo step, so
+// typing "12" into the fret box is one undo, not two.
+function pushUndo(tag){
+  const now = Date.now();
+  if (tag && tag === undoTag && undoStack.length && now - undoTagAt < 900){
+    undoTagAt = now;
+    return;
+  }
+  undoTag = tag || null;
+  undoTagAt = now;
+  undoStack.push(snapshot());
+  if (undoStack.length > 200) undoStack.shift();
+  redoStack.length = 0;
+}
+
+function step(from, to){
+  if (!from.length) return;
+  to.push(snapshot());
+  song = JSON.parse(from.pop());
+  undoTag = null;
+  clampCursor();
+  syncFields();
+  render();
+}
+function undo(){ step(undoStack, redoStack); }
+function redo(){ step(redoStack, undoStack); }
+function clampCursor(){
+  cursor.sec = Math.max(0, Math.min(cursor.sec, song.sections.length - 1));
+  cursor.i   = Math.max(0, Math.min(cursor.i, curNotes().length));
+  pendingFret = null;
+}
+
+/* ============================================================
+   Layout
+   ============================================================ */
+
+const PAGE_W    = 820;
+const PAD_X     = 40;
+const CONTENT_W = PAGE_W - PAD_X * 2;   // 740
+
+const HEAD_Y      = 46;   // rhythm note-head centre line
+const STEM_TOP    = 14;
+const STAFF_TOP   = 74;
+const STR_GAP     = 15;
+const STAFF_BOT   = STAFF_TOP + STR_GAP * (NSTR - 1);
+const NAME_Y      = STAFF_BOT + 25;
+const LYRIC_Y     = NAME_Y + 19;
+
+const FONT_FRET  = "600 12.5px system-ui,-apple-system,sans-serif";
+const FONT_NAME  = "500 12.5px system-ui,-apple-system,sans-serif";
+const FONT_LYRIC = "12px system-ui,-apple-system,sans-serif";
+const FONT_CHORD = "700 13px system-ui,-apple-system,sans-serif";
+const CHORD_H    = 26;   // extra height a section needs when it carries chords
+const TUP_BAND   = 14;   // headroom for triplet brackets, just above the beams
+const VOLTA_BAND = 20;   // headroom for 1st / 2nd ending brackets, at the top
+const CHORD_Y    = 2;    // baseline, in body coordinates — sits just above the stems,
+                         // so the slack in the chord band falls above the text and the
+                         // chord groups with its own rhythm row rather than the system above
+
+const BASE_W = { w:80, h:62, q:46, e:33, s:26 };
+const MEASURE_PAD_L = 11, MEASURE_PAD_R = 9, MEASURE_MIN_W = 76;
+const REPEAT_W = 14;   // room a |: or :| takes up inside the bar
+
+function stringY(s){ return STAFF_TOP + (NSTR - 1 - s) * STR_GAP; }
+
+function noteWidth(notes, i){
+  const n = notes[i];
+  let w = BASE_W[n.dur] * (n.dots ? 1.16 : 1);
+  const label = (!n.rest && !isTiedInto(notes, i));
+  if (label){
+    w = Math.max(w, textW(n.dead ? "x" : String(n.fret), FONT_FRET) + 12);
+    if (!n.dead) w = Math.max(w, textW(nameOf(n), FONT_NAME) + 10);
+  }
+  if (n.link) w += 7;              // room for the h / p / slide mark between notes
+  if (n.lyric) w = Math.max(w, textW(n.lyric, FONT_LYRIC) + 8);
+  if (n.chord) w = Math.max(w, textW(n.chord, FONT_CHORD) + 10);
+  return w;
+}
+
+function splitMeasures(notes){
+  const cap = measureCapacity();
+  const out = [];
+  let cur = [], acc = 0, start = 0;
+  for (let i = 0; i < notes.length; i++){
+    cur.push(i);
+    acc += noteBeats(notes[i]);
+    if (acc >= cap - 1e-9){ out.push({ idx:cur, start }); cur = []; start = i + 1; acc = 0; }
+  }
+  if (cur.length) out.push({ idx:cur, start });
+  if (!out.length) out.push({ idx:[], start:0 });
+  return out;
+}
+
+// Is this note the first one in its bar?
+function isMeasureStart(sec, i){
+  return splitMeasures(sec.notes).some(m => m.idx.length && m.idx[0] === i);
+}
+
+// Bar-level settings are stored on the bar's first note. Given any note, this
+// returns the note that carries them, so you can toggle a repeat or a line
+// break from wherever the cursor happens to be in the bar.
+function barAnchor(sec, i){
+  for (const m of splitMeasures(sec.notes)) if (m.idx.indexOf(i) >= 0) return m.idx[0];
+  return i;
+}
+
+function anchorNote(){
+  const ns = curNotes();
+  if (!ns.length || cursor.i >= ns.length) return null;
+  return ns[barAnchor(curSection(), cursor.i)];
+}
+
+function barsPerLine(){
+  const v = song.barsPerLine;
+  return (v && v !== "auto") ? +v : 0;
+}
+
+// → [{ measures:[{items:[{i,x,w}], x, w}], width }]
+function layoutSection(sec){
+  const notes = sec.notes;
+  const measures = splitMeasures(notes).map(m => {
+    const first = m.idx.length ? m.idx[0] : -1;
+    const flags = first >= 0 ? notes[first] : null;
+    // repeat signs need room inside the bar, next to the barline
+    const padL = MEASURE_PAD_L + (flags && flags.repStart ? REPEAT_W : 0);
+    const padR = MEASURE_PAD_R + (flags && flags.repEnd   ? REPEAT_W : 0);
+
+    const items = [];
+    let x = padL;
+    for (const i of m.idx){
+      const w = noteWidth(notes, i);
+      items.push({ i, x, w });
+      x += w;
+    }
+    return { items, w: Math.max(MEASURE_MIN_W, x + padR), x: 0, first };
+  });
+
+  const bpl = barsPerLine();
+
+  // Pack measures into systems. A fixed bars-per-line is authoritative: the
+  // bars are rescaled to fit the width below, so natural width must NOT also
+  // break the line — doing both is what left short, half-filled rows.
+  const systems = [];
+  let cur = [], used = 0;
+  for (const m of measures){
+    const manual = m.first >= 0 && (notes[m.first].brk || notes[m.first].pageBrk);
+    const full = bpl ? cur.length >= bpl : used + m.w > CONTENT_W;
+    if (cur.length && (manual || full)){
+      systems.push({ measures:cur, used }); cur = []; used = 0;
+    }
+    cur.push(m); used += m.w;
+  }
+  if (cur.length) systems.push({ measures:cur, used });
+
+  systems.forEach((sys, si) => {
+    let x = 0;
+    for (const m of sys.measures){
+      // Fixed bars-per-line gives every bar the same width, like ruled paper.
+      // Otherwise stretch the system to the margin, leaving the last one short.
+      let scale;
+      if (bpl){
+        scale = (CONTENT_W / bpl) / m.w;
+      } else {
+        const last = si === systems.length - 1;
+        scale = (!last && sys.used > 0) ? Math.min(CONTENT_W / sys.used, 1.8) : 1;
+      }
+      m.x = x;
+      m.w *= scale;
+      for (const it of m.items){ it.x *= scale; it.w *= scale; }
+      x += m.w;
+    }
+    sys.width = x;
+  });
+  return systems;
+}
+
+/* ============================================================
+   Beaming
+   ============================================================ */
+
+// Group beamable notes (eighths & shorter) that share a beat unit.
+function beamGroups(notes, measure){
+  const unit = beamUnit();
+  const groups = [];
+  let cur = null, pos = 0;
+
+  // beat position of the first note in this measure
+  for (let k = 0; k < measure.items.length; k++){
+    const it = measure.items[k];
+    const n = notes[it.i];
+    const beamable = !n.rest && (n.dur === "e" || n.dur === "s");
+    const unitIdx = Math.floor(pos / unit + 1e-9);
+    if (beamable){
+      if (cur && cur.unitIdx === unitIdx) cur.items.push(it);
+      else { cur = { unitIdx, items:[it] }; groups.push(cur); }
+    } else {
+      cur = null;
+    }
+    pos += noteBeats(n);
+  }
+  return groups;
+}
+
+/* ============================================================
+   SVG drawing
+   ============================================================ */
+
+function svgHead(x, y, filled, whole){
+  const rx = whole ? 6.6 : 5.3, ry = whole ? 4.4 : 4.05;
+  const fill = filled ? "#111" : "none";
+  const sw = filled ? 0 : 1.7;
+  return `<ellipse cx="${x}" cy="${y}" rx="${rx}" ry="${ry}" transform="rotate(-20 ${x} ${y})" `
+       + `fill="${fill}" stroke="#111" stroke-width="${sw}"/>`;
+}
+
+function svgDeadHead(x, y){
+  const r = 4.3;
+  return `<line x1="${x-r}" y1="${y-r}" x2="${x+r}" y2="${y+r}" stroke="#111" stroke-width="1.8"/>`
+       + `<line x1="${x-r}" y1="${y+r}" x2="${x+r}" y2="${y-r}" stroke="#111" stroke-width="1.8"/>`;
+}
+
+function svgFlag(x, y){
+  // one flag (eighth) hanging off the stem top, drawn to the right
+  return `<path d="M${x},${y} c 6,3 9.5,7.5 8.5,14 c 3.5,-8 1.5,-13 -8.5,-18 z" fill="#111"/>`;
+}
+function svgFlag2(x, y){
+  return svgFlag(x, y) + svgFlag(x, y + 7.5);
+}
+
+const BAR_INK = "#33383f";
+
+function plainBar(x){
+  return `<line x1="${x}" y1="${STAFF_TOP}" x2="${x}" y2="${STAFF_BOT}" `
+       + `stroke="${BAR_INK}" stroke-width="1.6"/>`;
+}
+
+// |: — thick line, thin line, then the two dots, reading into the bar
+function repeatStart(x){
+  const h = STAFF_BOT - STAFF_TOP;
+  return `<rect x="${x}" y="${STAFF_TOP}" width="3" height="${h}" fill="${BAR_INK}"/>`
+       + `<line x1="${x+5.5}" y1="${STAFF_TOP}" x2="${x+5.5}" y2="${STAFF_BOT}" stroke="${BAR_INK}" stroke-width="1.3"/>`
+       + `<circle cx="${x+10}" cy="${STAFF_TOP+7.5}" r="2" fill="${BAR_INK}"/>`
+       + `<circle cx="${x+10}" cy="${STAFF_BOT-7.5}" r="2" fill="${BAR_INK}"/>`;
+}
+
+// :| — the same, mirrored, so the thick line lands on the boundary
+function repeatEnd(x){
+  const h = STAFF_BOT - STAFF_TOP;
+  return `<circle cx="${x-10}" cy="${STAFF_TOP+7.5}" r="2" fill="${BAR_INK}"/>`
+       + `<circle cx="${x-10}" cy="${STAFF_BOT-7.5}" r="2" fill="${BAR_INK}"/>`
+       + `<line x1="${x-5.5}" y1="${STAFF_TOP}" x2="${x-5.5}" y2="${STAFF_BOT}" stroke="${BAR_INK}" stroke-width="1.3"/>`
+       + `<rect x="${x-3}" y="${STAFF_TOP}" width="3" height="${h}" fill="${BAR_INK}"/>`;
+}
+
+function svgRest(x, dur, dots){
+  const y = HEAD_Y;
+  let g = "";
+  if (dur === "w"){
+    // hangs below its reference line
+    g = `<line x1="${x-11}" y1="${y-9}" x2="${x+11}" y2="${y-9}" stroke="#9aa0a8" stroke-width="1"/>`
+      + `<rect x="${x-7}" y="${y-9}" width="14" height="5.5" fill="#111"/>`;
+  } else if (dur === "h"){
+    // sits on top of its reference line
+    g = `<line x1="${x-11}" y1="${y+2.5}" x2="${x+11}" y2="${y+2.5}" stroke="#9aa0a8" stroke-width="1"/>`
+      + `<rect x="${x-7}" y="${y-3}" width="14" height="5.5" fill="#111"/>`;
+  } else if (dur === "q"){
+    g = `<path d="M${x-3.5},${y-15} l6,7.5 l-5.5,6 l6.5,7.5 c-4,-2.5 -8,-0.5 -6.5,3.5 `
+      + `c-3.5,-3.5 -1,-8.5 4,-7 l-6,-7 l5.5,-6 z" fill="#111"/>`;
+  } else {
+    // eighth / sixteenth: slanted stroke with 1 or 2 dot-hooks
+    const n = dur === "s" ? 2 : 1;
+    g = `<path d="M${x+3.5},${y-11} L${x-3},${y+9}" stroke="#111" stroke-width="1.7" fill="none"/>`;
+    for (let k = 0; k < n; k++){
+      const cy = y - 9 + k * 8, cx = x - 2.5 + k * 2.6;
+      g += `<circle cx="${cx}" cy="${cy}" r="2.4" fill="#111"/>`
+         + `<path d="M${cx},${cy-1.5} c4,-1 6.5,1 7,4" stroke="#111" stroke-width="1.5" fill="none"/>`;
+    }
+  }
+  for (let d = 0; d < dots; d++) g += `<circle cx="${x + 11 + d*4.5}" cy="${y}" r="1.9" fill="#111"/>`;
+  return g;
+}
+
+function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, showEnds){
+  const notes = sec.notes;
+
+  // The body keeps its own coordinates and is translated down to leave room for
+  // the rows stacked on top. Reading upward from the stems: triplet brackets sit
+  // closest, then chord symbols, then volta brackets.
+  const tupBand   = showTups  ? TUP_BAND   : 0;
+  const chordBand = showChords ? CHORD_H   : 0;
+  const voltaBand = showEnds  ? VOLTA_BAND : 0;
+  const top = voltaBand + chordBand + tupBand;
+
+  const bodyH = showLyrics ? LYRIC_Y + 8 : NAME_Y + 8;
+  const H = bodyH + top;
+  const selY = top ? 2 - top : 6;
+  const selH = (bodyH - 6) - selY;
+  const W = CONTENT_W + 4;
+  const beamed = new Set();
+  let s = "";
+
+  // ---- selection highlight (behind everything) ---------------------
+  {
+    for (const m of sys.measures){
+      for (const it of m.items){
+        if (inSelection(secIdx, it.i))
+          s += `<rect class="sel" x="${m.x + it.x}" y="${selY}" width="${it.w}" height="${selH}" rx="4" fill="#fff2c9"/>`;
+      }
+    }
+  }
+
+  // ---- staff lines -------------------------------------------------
+  for (let st = 0; st < NSTR; st++){
+    const y = stringY(st);
+    s += `<line x1="0" y1="${y}" x2="${sys.width}" y2="${y}" stroke="#9aa0a8" stroke-width="1"/>`;
+  }
+  // ---- triplet brackets, just above the beams ----------------------
+  if (showTups){
+    const pos = new Map();
+    for (const mm of sys.measures)
+      for (const it of mm.items)
+        pos.set(it.i, mm.x + it.x + it.w / 2);
+
+    for (const run of tupletRuns(notes)){
+      const a = pos.get(run.from), b = pos.get(run.to);
+      if (a === undefined || b === undefined) continue;   // split across lines
+      const x1 = a - 5, x2 = b + 5, mid = (x1 + x2) / 2;
+      const y = 5, tick = 9.5;
+      s += `<path d="M${x1},${tick} L${x1},${y} L${mid-6},${y} M${mid+6},${y} L${x2},${y} L${x2},${tick}" `
+         + `stroke="#33383f" stroke-width="1.1" fill="none"/>`
+         + `<text x="${mid}" y="${y+3.6}" text-anchor="middle" font-size="9.5" font-weight="700" `
+         + `font-style="italic" font-family="system-ui,-apple-system,sans-serif" fill="#33383f">${run.n}</text>`;
+    }
+  }
+
+  // ---- volta brackets for 1st / 2nd endings -------------------------
+  if (showEnds){
+    const yTop = 6 - top, yTick = 15 - top;          // in body coordinates
+    let run = null;
+    const flush = () => {
+      if (!run) return;
+      const closes = run.closes;
+      s += `<path d="M${run.x1},${yTick} L${run.x1},${yTop} L${run.x2},${yTop}`
+         + (closes ? ` L${run.x2},${yTick}` : "") + `" `
+         + `stroke="#33383f" stroke-width="1.3" fill="none"/>`
+         + `<text x="${run.x1 + 4}" y="${yTick - 1}" font-size="9.5" font-weight="700" `
+         + `font-family="system-ui,-apple-system,sans-serif" fill="#33383f">${run.k}.</text>`;
+      run = null;
+    };
+    for (const mm of sys.measures){
+      const head = mm.first >= 0 ? notes[mm.first] : null;
+      const k = head ? head.ending : 0;
+      if (!k){ flush(); continue; }
+      if (run && run.k !== k) flush();
+      if (!run) run = { k, x1: mm.x, x2: mm.x + mm.w, closes: false };
+      else run.x2 = mm.x + mm.w;
+      run.closes = !!(head && head.repEnd);
+    }
+    flush();
+  }
+
+  // ---- barlines ----------------------------------------------------
+  // Each boundary is drawn once, from the bars on either side of it: a bar that
+  // closes a repeat and one that opens the next give ":||:" at the same x.
+  const flagsOf = m => (m && m.first >= 0 ? notes[m.first] : null);
+
+  const lead = flagsOf(sys.measures[0]);
+  s += (lead && lead.repStart) ? repeatStart(0.5) : plainBar(0.5);
+
+  // bar number, above the left edge of the line
+  if (barNo)
+    s += `<text x="1" y="${STAFF_TOP - 7}" font-size="10" font-weight="600" `
+       + `font-family="system-ui,-apple-system,sans-serif" fill="#98a0ab">${barNo}</text>`;
+
+  sys.measures.forEach((m, mi) => {
+    const bx = m.x + m.w;
+    const here = flagsOf(m);
+    const next = flagsOf(sys.measures[mi + 1]);
+    const closes = !!(here && here.repEnd);
+    const opens  = !!(next && next.repStart);
+
+    if (closes) s += repeatEnd(bx);
+    if (opens)  s += repeatStart(bx);
+    if (!closes && !opens) s += plainBar(bx);
+
+    if (closes){
+      s += `<text x="${bx - 2}" y="${STAFF_TOP - 6}" text-anchor="end" font-size="11" `
+         + `font-weight="700" font-family="system-ui,-apple-system,sans-serif" `
+         + `fill="#33383f">${(here.repTimes || 2)}x</text>`;
+    }
+  });
+
+  // ---- per-measure content ----------------------------------------
+  for (const m of sys.measures){
+    // beams first, so we know which stems skip their flag
+    for (const g of beamGroups(notes, m)){
+      if (g.items.length < 2){ continue; }
+      const xs = g.items.map(it => m.x + it.x + it.w/2 + 5.1);
+      const x1 = xs[0], x2 = xs[xs.length-1];
+      s += `<rect x="${x1}" y="${STEM_TOP}" width="${x2-x1}" height="3.6" fill="#111"/>`;
+      // secondary beam over runs of 16ths
+      let run = [];
+      const flush = () => {
+        if (run.length >= 2){
+          s += `<rect x="${run[0]}" y="${STEM_TOP+6.4}" width="${run[run.length-1]-run[0]}" height="3.6" fill="#111"/>`;
+        } else if (run.length === 1){
+          const solo = run[0], dir = solo === x1 ? 1 : -1;
+          s += `<rect x="${dir>0?solo:solo-8}" y="${STEM_TOP+6.4}" width="8" height="3.6" fill="#111"/>`;
+        }
+        run = [];
+      };
+      g.items.forEach((it, k) => {
+        if (notes[it.i].dur === "s") run.push(xs[k]); else flush();
+      });
+      flush();
+      g.items.forEach(it => beamed.add(it.i));
+    }
+
+    // notes
+    for (const it of m.items){
+      const n = notes[it.i];
+      const cx = m.x + it.x + it.w / 2;
+      const selected = inSelection(secIdx, it.i);
+
+      // --- rhythm row ---
+      if (n.rest){
+        s += svgRest(cx, n.dur, n.dots);
+      } else {
+        const filled = (n.dur !== "w" && n.dur !== "h");
+        s += n.dead ? svgDeadHead(cx, HEAD_Y) : svgHead(cx, HEAD_Y, filled, n.dur === "w");
+        if (n.dur !== "w"){
+          s += `<line x1="${cx+5.1}" y1="${HEAD_Y-0.5}" x2="${cx+5.1}" y2="${STEM_TOP}" stroke="#111" stroke-width="1.5"/>`;
+          if (!beamed.has(it.i)){
+            if (n.dur === "e") s += svgFlag(cx+5.1, STEM_TOP);
+            if (n.dur === "s") s += svgFlag2(cx+5.1, STEM_TOP);
+          }
+        }
+        for (let d = 0; d < n.dots; d++)
+          s += `<circle cx="${cx + 11 + d*4.5}" cy="${HEAD_Y-4.5}" r="1.9" fill="#111"/>`;
+      }
+
+      // Centre of the following note, if it is on this system.
+      const nextX = () => {
+        const nxt = m.items.find(o => o.i === it.i + 1);
+        if (nxt) return m.x + nxt.x + nxt.w/2;
+        const nm = sys.measures[sys.measures.indexOf(m) + 1];
+        const first = nm && nm.items[0];
+        return (first && first.i === it.i + 1) ? nm.x + first.x + first.w/2 : null;
+      };
+
+      // --- tie / slur to the next note (same system only) ---
+      if (n.tie){
+        const x2 = nextX();
+        if (x2 !== null){
+          const y0 = HEAD_Y + 7.5, mid = (cx + x2) / 2;
+          s += `<path d="M${cx},${y0} Q${mid},${y0+9} ${x2},${y0}" stroke="#111" stroke-width="1.4" fill="none"/>`;
+        }
+      }
+
+      // --- hammer-on / pull-off / slide, written between the fret numbers ---
+      const link = notes[it.i + 1];
+      if (n.link && !n.rest && link && !link.rest){
+        const x2 = nextX();
+        if (x2 !== null){
+          const y = stringY(n.string), mid = (cx + x2) / 2;
+          if (n.link === "slide"){
+            // the line leans the way the hand travels
+            const up = midiOf(link) >= midiOf(n) ? 1 : -1;
+            s += `<line x1="${mid-5.5}" y1="${y + 3.6*up}" x2="${mid+5.5}" y2="${y - 3.6*up}" `
+               + `stroke="#111" stroke-width="1.5"/>`;
+          } else {
+            const letter = midiOf(link) > midiOf(n) ? "h" : "p";
+            s += `<rect x="${mid-4.6}" y="${y-6.5}" width="9.2" height="13" fill="${selected?"#fff2c9":"#fff"}"/>`
+               + `<text x="${mid}" y="${y+4}" text-anchor="middle" font-size="10.5" font-weight="700" `
+               + `font-style="italic" font-family="system-ui,-apple-system,sans-serif" fill="#111">${letter}</text>`;
+          }
+          // a slur over the pair, as in printed tab
+          const y0 = HEAD_Y + 7.5, mx = (cx + x2) / 2;
+          if (!n.tie)
+            s += `<path d="M${cx},${y0} Q${mx},${y0+8} ${x2},${y0}" stroke="#111" stroke-width="1.1" `
+               + `fill="none" opacity="0.75"/>`;
+        }
+      }
+
+      // --- fret number on the staff ---
+      if (!n.rest && !isTiedInto(notes, it.i)){
+        const y = stringY(n.string);
+        const t = n.dead ? "x" : String(n.fret);
+        const tw = textW(t, FONT_FRET);
+        s += `<rect class="${selected?"selbg":""}" x="${cx - tw/2 - 2.5}" y="${y-7}" width="${tw+5}" height="14" fill="${selected?"#fff2c9":"#fff"}"/>`;
+        s += `<text x="${cx}" y="${y+4.4}" text-anchor="middle" `
+           + `font-size="12.5" font-weight="600" font-family="system-ui,-apple-system,sans-serif" fill="#111">${t}</text>`;
+        // --- note name row (a dead note has no pitch to name) ---
+        if (!n.dead)
+          s += `<text x="${cx}" y="${NAME_Y}" text-anchor="middle" font-size="12.5" font-weight="500" `
+             + `font-family="system-ui,-apple-system,sans-serif" fill="#1b1d21">${esc(nameOf(n))}</text>`;
+      }
+
+      // --- chord row, above everything ---
+      if (showChords && n.chord){
+        s += `<text x="${cx}" y="${CHORD_Y - tupBand}" text-anchor="middle" font-size="13" font-weight="700" `
+           + `font-family="system-ui,-apple-system,sans-serif" fill="#1b1d21">${esc(n.chord)}</text>`;
+      }
+
+      // --- lyric row ---
+      if (showLyrics && n.lyric){
+        s += `<text x="${cx}" y="${LYRIC_Y}" text-anchor="middle" font-size="12" `
+           + `font-family="system-ui,-apple-system,sans-serif" fill="#33383f">${esc(n.lyric)}</text>`;
+      }
+
+      // --- hit targets ---
+      s += `<rect class="hit" x="${m.x+it.x}" y="${selY}" width="${it.w}" height="${selH}" data-sec="${secIdx}" data-i="${it.i}"/>`;
+      for (let st = 0; st < NSTR; st++){
+        s += `<rect class="hitstr" x="${m.x+it.x}" y="${stringY(st)-7}" width="${it.w}" height="14" `
+           + `fill="transparent" style="cursor:pointer" data-sec="${secIdx}" data-i="${it.i}" data-str="${st}"/>`;
+      }
+    }
+
+    // append-cursor caret at the very end of the section
+    if (secIdx === cursor.sec && cursor.i === notes.length && m === sys.measures[sys.measures.length-1]){
+      const last = m.items[m.items.length-1];
+      const cx = last ? m.x + last.x + last.w + 8 : m.x + MEASURE_PAD_L + 6;
+      s += `<line x1="${cx}" y1="24" x2="${cx}" y2="${STAFF_BOT+4}" stroke="#2f6fd0" stroke-width="1.6"/>`;
+    }
+  }
+
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
+       + `<g transform="translate(0,${top})">${s}</g></svg>`;
+}
+
+/* ============================================================
+   Render
+   ============================================================ */
+
+function render(){
+  const page = $("#page");
+  let html = "";
+
+  html += `<div class="songhead"><div class="t">${esc(song.title || "Untitled")}</div>`;
+  if (song.artist) html += `<div class="a">${esc(song.artist)}</div>`;
+  html += `</div>`;
+
+  let barNo = 1;                 // counts on across sections, references excepted
+
+  song.sections.forEach((sec, si) => {
+    if (sec.ref){
+      html += `<div class="section ref${sec.pageBrk ? " pagebreak" : ""}" data-sec="${si}">`
+           +  `<input class="sectionhead" data-sechead="${si}" value="${esc(sec.heading)}" placeholder="e.g. Chorus">`
+           +  `<span class="reftag">name only</span></div>`;
+      return;
+    }
+
+    const showLyrics = sec.notes.some(n => n.lyric);
+    const showChords = sec.notes.some(n => n.chord);
+    const showTups   = sec.notes.some(n => n.tup);
+    const showEnds   = sec.notes.some(n => n.ending);
+    const systems = layoutSection(sec);
+
+    // A page break sits on the first note of a bar; a bar carrying one always
+    // begins a system (see layoutSection). When that system is the section's
+    // first, the break goes on the section instead so the heading moves too.
+    const opensPage = sys => {
+      const m = sys.measures[0];
+      return !!(m && m.first >= 0 && sec.notes[m.first].pageBrk);
+    };
+    const sectionBreaks = !!sec.pageBrk || (systems.length > 0 && opensPage(systems[0]));
+
+    html += `<div class="section${sectionBreaks ? " pagebreak" : ""}" data-sec="${si}">`;
+    html += `<input class="sectionhead" data-sechead="${si}" value="${esc(sec.heading)}" placeholder="section name…">`;
+    systems.forEach((sys, k) => {
+      const brk = k > 0 && opensPage(sys) ? " pagebreak" : "";
+      html += `<div class="system${brk}">${drawSystem(si, sec, sys, showLyrics, showChords, barNo, showTups, showEnds)}</div>`;
+      barNo += sys.measures.length;
+    });
+    html += `</div>`;
+  });
+
+  page.innerHTML = html;
+  renderSidebar();
+  renderStatus();
+  persist();
+}
+
+// Worked example for whichever octave convention is selected, computed through
+// nameOf so the hint can never drift from what the score actually prints.
+function octHint(){
+  if (!song.octaves || song.octaves === "off") return "";
+  const at = (string, fret) => nameOf({ string, fret, rest:false, spell:null });
+  return `open E = ${at(0,0)} &nbsp;·&nbsp; lowest ${names().def[1]} = ${at(1,4)}`
+       + ` &nbsp;·&nbsp; middle C = ${at(3,17)}`;
+}
+
+function renderSidebar(){
+  $("#octHint").innerHTML = octHint();
+
+  // --- sections list ---
+  const sl = $("#seclist");
+  sl.innerHTML = song.sections.map((s, i) => `
+    <div class="secitem ${i===cursor.sec?"active":""}">
+      <input class="fld" data-sechead2="${i}" value="${esc(s.heading)}" placeholder="section ${i+1}">
+      <button class="mini ${s.ref?"on":""}" data-secref="${i}" title="Name only — no notation">R</button>
+      <button class="mini" data-secup="${i}" title="Move up">↑</button>
+      <button class="mini" data-secdown="${i}" title="Move down">↓</button>
+      <button class="mini" data-secdel="${i}" title="Delete section">×</button>
+    </div>`).join("");
+
+  // --- note inspector ---
+  const n = curNote();
+  const ins = $("#inspector");
+
+  if (isRefSection()){
+    const kept = curSection().notes.length;
+    const brk = !!curSection().pageBrk;
+    ins.innerHTML = `<div class="empty">This section shows its name only.</div>`
+      + (kept ? `<div class="muted" style="margin-top:7px">${kept} note${kept>1?"s":""} kept, hidden. Turn <b>R</b> off in the list to show them again.</div>`
+              : `<div class="muted" style="margin-top:7px">Type its name in the list, e.g. “Chorus”.</div>`)
+      + `<div class="row" style="margin-top:10px"><label>New page</label>
+           <button class="btn ${brk?"on":""}" data-pagebrk style="flex:1" title="Start a new printed page at this section (p)"
+           >${brk?"page starts here":"no"}</button>
+         </div>`;
+    return;
+  }
+  const durBtns = DUR_ORDER.map(d => {
+    const on = (n ? n.dur : entry.dur) === d;
+    return `<button class="btn ${on?"on":""}" data-dur="${d}" title="${DUR_LABEL[d]}">${d}</button>`;
+  }).join("");
+
+  if (!n){
+    ins.innerHTML = `
+      <div class="empty" style="margin-bottom:9px">At the end — type a fret number to add a note.</div>
+      <div class="row"><label>Length</label><div class="grid" style="flex:1">${durBtns}</div></div>
+      <div class="row"><label>String</label>
+        <select class="fld" data-str>${STRING_LABEL.map((l,i)=>
+          `<option value="${i}" ${entry.string===i?"selected":""}>${l}</option>`).reverse().join("")}</select>
+      </div>
+      <div class="row"><label>Dot</label>
+        <button class="btn ${entry.dots?"on":""}" data-dot style="flex:1">${entry.dots?"dotted":"none"}</button>
+      </div>`;
+  } else {
+    const bar = anchorNote() || n;
+    ins.innerHTML = `
+      <div class="row"><label>Length</label><div class="grid" style="flex:1">${durBtns}</div></div>
+      <div class="row"><label>Dot</label>
+        <button class="btn ${n.dots?"on":""}" data-dot style="flex:1">${n.dots?"dotted":"none"}</button>
+      </div>
+      <div class="row"><label>Rest</label>
+        <button class="btn ${n.rest?"on":""}" data-rest style="flex:1">${n.rest?"is a rest":"no"}</button>
+      </div>
+      ${n.rest ? "" : `
+      <div class="row"><label>Dead note</label>
+        <button class="btn ${n.dead?"on":""}" data-dead style="flex:1" title="Ghost / muted note, written as x  (x)"
+        >${n.dead?"muted — x":"no"}</button>
+      </div>
+      <div class="row"><label>Triplet</label>
+        <button class="btn ${n.tup?"on":""}" data-tup style="flex:1"
+          title="Split into three, or merge a triplet back (⇧T)"
+        >${n.tup ? "part of a triplet" : "split into 3"}</button>
+      </div>
+      <div class="row"><label>To next</label>
+        <div class="grid" style="flex:1">
+          <button class="btn ${n.link===null?"on":""}" data-link="">plain</button>
+          <button class="btn ${n.link==="legato"?"on":""}" data-link="legato" title="Hammer-on or pull-off, chosen by direction">h / p</button>
+          <button class="btn ${n.link==="slide"?"on":""}" data-link="slide">slide</button>
+        </div>
+      </div>`}
+      ${n.rest ? "" : `
+      <div class="row"><label>String</label>
+        <select class="fld" data-str>${STRING_LABEL.map((l,i)=>
+          `<option value="${i}" ${n.string===i?"selected":""}>${l}</option>`).reverse().join("")}</select>
+      </div>
+      <div class="row"><label>Fret</label>
+        <input class="fld" type="number" min="0" max="24" data-fret value="${n.fret}">
+      </div>
+      <div class="row"><label>Name</label>
+        <button class="btn" data-spell style="flex:1" ${hasAltSpelling(n)?"":"disabled"}>${esc(nameOf(n))}${hasAltSpelling(n)?" ⇄":""}</button>
+      </div>
+      <div class="row"><label>Tie</label>
+        <button class="btn ${n.tie?"on":""}" data-tie style="flex:1">${n.tie?"tied to next":"no"}</button>
+      </div>`}
+      <div class="row"><label>Chord</label>
+        <input class="fld" data-chord id="chordInput" value="${esc(n.chord)}" placeholder="e.g. F#m">
+      </div>
+      <div class="row"><label>Lyric</label>
+        <input class="fld" data-lyric id="lyricInput" value="${esc(n.lyric)}" placeholder="syllable">
+      </div>
+      <div class="row" style="margin-top:10px"><label style="font-weight:600;color:var(--ink)">This bar</label></div>
+      <div class="row"><label>Repeat</label>
+        <div class="grid" style="flex:1">
+          <button class="btn ${bar.repStart?"on":""}" data-repstart title="Open a repeat at this bar ( [ )">|: open</button>
+          <button class="btn ${bar.repEnd?"on":""}" data-repend title="Close a repeat at this bar ( ] )">close :|</button>
+        </div>
+      </div>
+      ${bar.repEnd ? `<div class="row"><label>Play</label>
+        <input class="fld" type="number" min="2" max="99" data-reptimes value="${bar.repTimes||2}" style="flex:0 0 64px">
+        <span class="muted">times in total</span>
+      </div>` : ""}
+      <div class="row"><label>Ending</label>
+        <button class="btn ${bar.ending?"on":""}" data-ending style="flex:1"
+          title="1st / 2nd time bar inside a repeat (v)"
+        >${bar.ending ? bar.ending + (bar.ending===1?"st":bar.ending===2?"nd":"rd") + " time" : "no"}</button>
+      </div>
+      <div class="row"><label>New line</label>
+        <button class="btn ${bar.brk?"on":""}" data-brk style="flex:1"
+        >${bar.brk?"line starts here":"no"}</button>
+      </div>
+      <div class="row"><label>New page</label>
+        <button class="btn ${bar.pageBrk?"on":""}" data-pagebrk style="flex:1" title="Start a new printed page at this bar (p)"
+        >${bar.pageBrk?"page starts here":"no"}</button>
+      </div>
+      <div class="row"><label></label>
+        <button class="btn" data-del style="flex:1">Delete note</button>
+      </div>`;
+  }
+}
+
+function renderStatus(){
+  const clip = readClip();
+  const hint = $("#stHint");
+  if (hint){
+    hint.textContent = clip
+      ? `Clipboard: ${clip.length} note${clip.length>1?"s":""} — ⌘V pastes after the selection`
+      : "Click a note to select it · click a staff line to move it to that string";
+  }
+
+  const ns = curNotes();
+  $("#stPos").innerHTML = `Section <b>${cursor.sec+1}/${song.sections.length}</b> · note <b>${Math.min(cursor.i+1, ns.length||1)}/${ns.length}</b>`;
+  const r = selRange();
+  if (r){
+    $("#stNote").innerHTML = `<b>${selCount()}</b> notes selected`;
+    return;
+  }
+  const n = curNote();
+  $("#stNote").innerHTML = n
+    ? (n.rest ? `<b>${DUR_LABEL[n.dur]}${n.dots?" dotted":""} rest</b>`
+              : `<b>${nameOf(n)}</b> · ${STRING_LABEL[n.string]}-string fret ${n.fret} · ${DUR_LABEL[n.dur]}${n.dots?" dotted":""}`)
+    : "";
+}
+
+function persist(){
+  try{
+    localStorage.setItem(LS_KEY, JSON.stringify(song));
+    $("#saveState").textContent = "autosaved";
+  }catch(e){ /* storage may be unavailable from file:// in some browsers */ }
+}
+
+
+/* ============================================================
+   Playback
+   ============================================================ */
+
+let audioCtx = null, playTimer = null, play = null;
+let loopOn = false, playRate = 1;          // practice settings, not part of the song
+const PREF_KEY = "bass-notation-prefs";
+
+function loadPrefs(){
+  try {
+    const p = JSON.parse(localStorage.getItem(PREF_KEY) || "{}");
+    loopOn = !!p.loop;
+    playRate = Math.max(0.25, Math.min(1, +p.rate || 1));
+  } catch(e){}
+}
+function savePrefs(){
+  try { localStorage.setItem(PREF_KEY, JSON.stringify({ loop:loopOn, rate:playRate })); } catch(e){}
+}
+
+function ac(){
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function isPlaying(){ return !!play; }
+
+// Every note in playing order, reference sections skipped and repeats expanded:
+// a bar closing a repeat replays back to the last |: — or to the start of the
+// section if there is none — until it has been played repTimes in total.
+function timeline(){
+  const out = [];
+  const follow = song.followRepeats !== false;
+
+  song.sections.forEach((sec, si) => {
+    if (sec.ref || !sec.notes.length) return;
+    const ns = sec.notes;
+    const bars = splitMeasures(ns);
+    const emit = b => { for (const i of bars[b].idx) out.push({ si, i, n: ns[i] }); };
+
+    const headOf = b => (bars[b].idx.length ? ns[bars[b].idx[0]] : null);
+    const endingOf = b => ((headOf(b) || {}).ending || 0);
+
+    // Bars are not emitted as we pass them: a bar can turn out to be inside a
+    // repeat, and would then be played once here and again by the expansion.
+    // `done` is how far the output has got.
+    let open = 0, done = 0, b = 0;
+    while (b < bars.length){
+      const head = headOf(b);
+      if (head && head.repStart) open = b;
+
+      if (follow && head && head.repEnd){
+        for (let bb = done; bb < open; bb++) emit(bb);   // run-up to the repeat
+
+        const times = Math.max(2, Math.min(99, Math.round(head.repTimes) || 2));
+
+        // Alternate endings are the bars straight after the closing repeat; a
+        // first-time bar sits inside the body, before it.
+        let last = b;
+        while (last + 1 < bars.length && endingOf(last + 1)) last++;
+
+        for (let pass = 1; pass <= times; pass++){
+          for (let bb = open; bb <= b; bb++){
+            const e = endingOf(bb);
+            if (!e || e === pass) emit(bb);
+          }
+          for (let bb = b + 1; bb <= last; bb++)
+            if (endingOf(bb) === pass) emit(bb);
+        }
+        done = last + 1;
+        b = last + 1;
+        continue;
+      }
+      b++;
+    }
+    for (let bb = done; bb < bars.length; bb++) emit(bb);
+  });
+  return out;
+}
+
+// Adjacent in the timeline is not enough — after a repeat jumps back, the
+// previous entry is a different note entirely, so require consecutive indices.
+const adjacent = (tl, k) =>
+  k > 0 && tl[k-1].si === tl[k].si && tl[k].i === tl[k-1].i + 1;
+
+const tiedFromPrev = (tl, k) =>
+  adjacent(tl, k) && tl[k-1].n.tie &&
+  !tl[k-1].n.rest && !tl[k].n.rest && !tl[k-1].n.dead && !tl[k].n.dead;
+
+// events = what to sound, steps = where the playhead is (rests included).
+// Repeat signs are not expanded: playback follows the notes as written.
+function buildPlan(fromK, toK){
+  const spb = 60 / ((song.tempo || 90) * playRate);
+  const tl = timeline();
+  const events = [], steps = [];
+  let t = 0;
+
+  for (let k = fromK; k <= toK && k < tl.length; k++){
+    const { si, i, n } = tl[k];
+    const dur = noteBeats(n) * spb;
+    steps.push({ t, si, i });
+
+    if (!n.rest && !tiedFromPrev(tl, k)){
+      let total = dur, m = k;
+      while (m < toK && tl[m].n.tie && tl[m+1] &&
+             adjacent(tl, m + 1) && !tl[m+1].n.rest){
+        m++;
+        total += noteBeats(tl[m].n) * spb;
+      }
+      // reached by a hammer, pull or slide? then no fresh pluck
+      const prev = adjacent(tl, k) ? tl[k-1] : null;
+      const via = (prev && !prev.n.rest && !prev.n.dead && !n.dead) ? prev.n.link : null;
+      events.push({
+        t, dur: total, midi: midiOf(n), si, i,
+        dead: !!n.dead,
+        soft: via === "legato" || via === "slide",
+        from: via === "slide" ? midiOf(prev.n) : null
+      });
+    }
+    t += dur;
+  }
+  return { events, steps, total: t };
+}
+
+// A selection plays alone; otherwise play from the cursor to the end.
+function playRange(){
+  const tl = timeline();
+  if (!tl.length) return null;
+  const at = (si, i) => tl.findIndex(e => e.si === si && e.i === i);
+
+  const r = selRange();
+  if (r){
+    const inSel = e => e.si === r.sec && e.i >= r.from && e.i <= r.to;
+    const a = tl.findIndex(inSel);
+    let b = -1;
+    for (let k = tl.length - 1; k >= 0; k--) if (inSel(tl[k])){ b = k; break; }
+    if (a >= 0 && b >= a) return [a, b];
+  }
+  const ns = curNotes();
+  const start = ns.length ? at(cursor.sec, Math.min(cursor.i, ns.length - 1)) : -1;
+  return [start < 0 ? 0 : start, tl.length - 1];
+}
+
+// A plucked bass: sawtooth through a closing lowpass. The fundamental of a low
+// E is ~41Hz and inaudible on a laptop speaker, so the harmonics carry the pitch.
+let noiseCache = null;
+function noiseBuffer(ctx){
+  if (noiseCache && noiseCache.sampleRate === ctx.sampleRate) return noiseCache;
+  const n = Math.floor(ctx.sampleRate * 0.2);
+  const b = ctx.createBuffer(1, n, ctx.sampleRate);
+  const d = b.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  return (noiseCache = b);
+}
+
+// A ghost note: a short filtered thud with no pitch.
+function deadVoice(ctx, when, out){
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuffer(ctx);
+  // A wide band, not a narrow one: a narrow filter throws away nearly all the
+  // noise and the thud ends up inaudible next to a plucked note.
+  const bp = ctx.createBiquadFilter();
+  bp.type = "bandpass";
+  bp.frequency.setValueAtTime(200, when);
+  bp.Q.setValueAtTime(0.7, when);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.exponentialRampToValueAtTime(1.6, when + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + 0.11);
+  src.connect(bp); bp.connect(g); g.connect(out);
+  src.start(when);
+  src.stop(when + 0.14);
+}
+
+function sound(ctx, when, ev, out){
+  if (ev.dead) deadVoice(ctx, when, out);
+  else voice(ctx, when, ev.dur, ev.midi, out, ev);
+}
+
+function voice(ctx, when, dur, midi, out, art){
+  const f = 440 * Math.pow(2, (midi - 69) / 12);
+  const osc = ctx.createOscillator();
+  osc.type = "sawtooth";
+  // a slide starts on the previous pitch and glides up or down into this one
+  const from = art && art.from ? 440 * Math.pow(2, (art.from - 69) / 12) : null;
+  osc.frequency.setValueAtTime(from || f, when);
+  if (from) osc.frequency.linearRampToValueAtTime(f, when + Math.min(0.11, dur * 0.5));
+
+  const lp = ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.Q.setValueAtTime(2.5, when);
+  lp.frequency.setValueAtTime(Math.min(5000, f * 16), when);
+  lp.frequency.exponentialRampToValueAtTime(Math.max(200, f * 2.5), when + Math.min(dur, 0.45));
+
+  const len = Math.max(0.09, dur * 0.92);
+  // hammered, pulled or slid notes are not plucked, so they speak more quietly
+  const peak = (art && art.soft) ? 0.16 : 0.28;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.exponentialRampToValueAtTime(peak, when + (art && art.soft ? 0.018 : 0.006));
+  g.gain.exponentialRampToValueAtTime(0.0001, when + len);
+
+  osc.connect(lp); lp.connect(g); g.connect(out);
+  osc.start(when);
+  osc.stop(when + len + 0.05);
+}
+
+// How much of the view is kept clear below the line being played, so there is
+// always something to read ahead into. Fraction of the visible height.
+const LOOKAHEAD = 0.42;
+const PLAY_LINE = 0.24;      // where a line lands after a turn, from the top
+
+let turnedTo = null;
+
+// Turn the page a line early rather than dragging the current line to the
+// bottom edge: a player needs to see the next bars before playing them.
+function scrollAhead(el){
+  const area = $("#scrollarea");
+  const sys = el && el.closest ? el.closest(".system") : null;
+  if (!area || !sys || sys === turnedTo) return;
+  turnedTo = sys;
+
+  const a = area.getBoundingClientRect();
+  const r = sys.getBoundingClientRect();
+
+  // still well clear of the bottom, and not above the top? leave the page alone
+  if (r.top >= a.top && r.bottom <= a.bottom - a.height * LOOKAHEAD) return;
+
+  const target = area.scrollTop + (r.top - a.top) - a.height * PLAY_LINE;
+  const most = area.scrollHeight - area.clientHeight;
+  area.scrollTo({ top: Math.max(0, Math.min(target, most)), behavior: "smooth" });
+}
+
+function highlightPlaying(step){
+  document.querySelectorAll(".system .hit.playing").forEach(e => e.classList.remove("playing"));
+  if (!step){ turnedTo = null; return; }
+  const el = document.querySelector(`.system .hit[data-sec="${step.si}"][data-i="${step.i}"]`);
+  if (el){
+    el.classList.add("playing");
+    scrollAhead(el);
+  }
+}
+
+// Which events fall inside [now, horizon)? Advances `state` and wraps round
+// when looping. Kept pure so the loop maths can be checked without real time.
+function windowEvents(plan, t0, state, now, horizon, loop){
+  const out = [];
+  const { events, total } = plan;
+  if (!events.length || total <= 0) return out;
+  let guard = 0;
+  while (guard++ < 4000){
+    if (state.k >= events.length){
+      if (!loop) break;
+      state.cycle++;
+      state.k = 0;
+    }
+    const ev = events[state.k];
+    const when = t0 + state.cycle * total + ev.t;
+    if (when >= horizon) break;
+    if (when >= now - 0.5) out.push({ when, ev });
+    state.k++;
+  }
+  return out;
+}
+
+// Which step is sounding at `elapsed` seconds in?
+function stepAt(plan, elapsed, loop){
+  const { steps, total } = plan;
+  if (!steps.length || elapsed < 0) return -1;
+  let t = elapsed;
+  if (loop && total > 0) t = t - Math.floor(t / total) * total;
+  else if (t >= total) return steps.length - 1;
+  let j = 0;
+  for (let i = 0; i < steps.length; i++){
+    if (steps[i].t <= t + 1e-9) j = i; else break;
+  }
+  return j;
+}
+
+function startPlayback(){
+  stopPlayback();
+  const range = playRange();
+  if (!range) return;
+
+  const ctx = ac();
+  if (ctx.state === "suspended") ctx.resume();
+
+  const plan = buildPlan(range[0], range[1]);
+  if (!plan.steps.length) return;
+
+  const master = ctx.createGain();
+  master.gain.setValueAtTime(1, ctx.currentTime);
+  master.connect(ctx.destination);
+
+  play = { ctx, master, plan, t0: ctx.currentTime + 0.12,
+           sched: { k: 0, cycle: 0 }, shown: -1, shownCycle: -1 };
+  playTimer = setInterval(pump, 25);
+  requestAnimationFrame(followPlayhead);
+  updateTransport();
+}
+
+// Schedule a little ahead of the clock rather than all at once, so a long
+// piece does not build thousands of nodes up front and stopping stays instant.
+function pump(){
+  const st = play;
+  if (!st) return;
+  const now = st.ctx.currentTime;
+  for (const { when, ev } of windowEvents(st.plan, st.t0, st.sched, now, now + 0.2, loopOn))
+    sound(st.ctx, when, ev, st.master);
+
+  if (!loopOn && st.sched.k >= st.plan.events.length &&
+      now > st.t0 + st.plan.total + 0.2) stopPlayback();
+}
+
+function followPlayhead(){
+  const st = play;
+  if (!st) return;
+  const elapsed = st.ctx.currentTime - st.t0;
+  const cycle = (loopOn && st.plan.total > 0) ? Math.floor(elapsed / st.plan.total) : 0;
+  const j = stepAt(st.plan, elapsed, loopOn);
+  if (j >= 0 && (j !== st.shown || cycle !== st.shownCycle)){
+    st.shown = j;
+    st.shownCycle = cycle;
+    highlightPlaying(st.plan.steps[j]);
+  }
+  requestAnimationFrame(followPlayhead);
+}
+
+function stopPlayback(){
+  if (playTimer){ clearInterval(playTimer); playTimer = null; }
+  if (play){
+    const { ctx, master } = play;
+    try {
+      const t = ctx.currentTime;
+      master.gain.cancelScheduledValues(t);
+      master.gain.setValueAtTime(master.gain.value, t);
+      master.gain.linearRampToValueAtTime(0, t + 0.03);
+      setTimeout(() => { try { master.disconnect(); } catch(e){} }, 120);
+    } catch(e){ /* context already gone */ }
+  }
+  play = null;
+  highlightPlaying(null);
+  updateTransport();
+}
+
+function togglePlayback(){ isPlaying() ? stopPlayback() : startPlayback(); }
+
+function setRate(r){
+  playRate = Math.max(0.25, Math.min(1, r));
+  savePrefs();
+  if (isPlaying()) startPlayback();     // re-plan at the new speed
+  updateTransport();
+}
+
+function toggleLoop(){
+  loopOn = !loopOn;
+  savePrefs();
+  if (isPlaying()) startPlayback();
+  updateTransport();
+}
+
+function updateTransport(){
+  const b = $("#btnPlay");
+  if (!b) return;
+  b.textContent = isPlaying() ? "Stop" : "Play";
+  b.classList.toggle("primary", isPlaying());
+  const l = $("#btnLoop");
+  if (l) l.classList.toggle("on", loopOn);
+  const r = $("#fRate");
+  if (r) r.value = String(Math.round(playRate * 100));
+}
+
+
+
+/* ============================================================
+   Chord sketch — lay out the shape of a song before any notes
+   ============================================================ */
+
+// "[Verse] Am | C | G" → sections of bars of chords. A newline separates bars
+// just as | does, so a progression can be typed a bar to a line.
+function parseSketch(text){
+  const blocks = [];
+  let cur = { heading:null, bars:[] }, bar = [];
+  const endBar = () => { if (bar.length){ cur.bars.push(bar); bar = []; } };
+  const endBlock = () => { endBar(); if (cur.bars.length || cur.heading !== null) blocks.push(cur); };
+
+  const tokens = String(text || "").replace(/[|\n]/g, " \n ").split(/[ \t]+/).filter(Boolean);
+  for (const t of tokens){
+    const head = /^\[(.*)\]$/.exec(t);
+    if (head){ endBlock(); cur = { heading: head[1].trim(), bars: [] }; continue; }
+    if (t === "\n"){ endBar(); continue; }
+    bar.push(t);
+  }
+  endBlock();
+  return blocks;
+}
+
+// Turn that into real bars: rests of the current note length, with each chord
+// on the rest that starts its share of the bar. Typing a fret over a rest later
+// keeps the chord, because it is the same note.
+function applySketch(text){
+  const blocks = parseSketch(text);
+  if (!blocks.length || !blocks.some(b => b.bars.length)) return 0;
+
+  pushUndo();
+  const cap = measureCapacity();
+  const unit = DUR[entry.dur] * (2 - Math.pow(0.5, entry.dots));
+  const per = Math.max(1, Math.round(cap / unit));
+
+  let si = cursor.sec;
+  let landedSec = -1, landedIdx = -1, added = 0;
+
+  for (const block of blocks){
+    if (block.heading !== null){
+      const here = song.sections[si];
+      if (here && !here.ref && !here.notes.length && !here.heading){
+        here.heading = block.heading;             // reuse an empty, unnamed one
+      } else {
+        song.sections.splice(si + 1, 0, newSection(block.heading));
+        si += 1;
+      }
+    }
+    let sec = song.sections[si];
+    if (!sec || sec.ref){
+      song.sections.splice(si + 1, 0, newSection(""));
+      si += 1;
+      sec = song.sections[si];
+    }
+
+    // finish any half-written bar first, so the new ones start on a barline
+    const total = sec.notes.reduce((a, n) => a + noteBeats(n), 0);
+    let gap = (cap - (total % cap)) % cap, guard = 0;
+    while (gap > 1e-9 && guard++ < 200){
+      const d = fitDur(Math.min(unit, gap));
+      sec.notes.push(newNote({ dur:d, rest:true, string:entry.string }));
+      gap -= DUR[d];
+    }
+
+    for (const chords of block.bars){
+      const start = sec.notes.length;
+      if (landedIdx < 0){ landedSec = si; landedIdx = start; }
+      for (let k = 0; k < per; k++)
+        sec.notes.push(newNote({ dur:entry.dur, dots:entry.dots, rest:true, string:entry.string }));
+
+      chords.forEach((c, k) => {
+        if (c === "-" || c === ".") return;       // a spacer, to place the next one
+        const at = start + Math.min(per - 1, Math.floor(k * per / chords.length));
+        sec.notes[at].chord = c;
+      });
+      added++;
+    }
+  }
+
+  if (landedIdx >= 0){ cursor.sec = landedSec; cursor.i = landedIdx; }
+  selAnchor = null;
+  pendingFret = null;
+  render();
+  return added;
+}
+
+/* ============================================================
+   Clipboard
+   ============================================================ */
+
+
+const CLIP_KEY = "bass-notation-clip";
+let clipboard = null;
+
+function readClip(){
+  if (clipboard && clipboard.length) return clipboard;
+  try {
+    const raw = localStorage.getItem(CLIP_KEY);
+    const a = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(a) && a.length) return (clipboard = a);
+  } catch(e){ /* storage unavailable */ }
+  return null;
+}
+
+function writeClip(notes){
+  clipboard = notes;
+  try { localStorage.setItem(CLIP_KEY, JSON.stringify(notes)); } catch(e){}
+}
+
+// The span the clipboard acts on: the selection, or just the cursor note.
+function clipSpan(){
+  const ns = curNotes();
+  if (!ns.length) return null;
+  const r = selRange();
+  const from = r ? r.from : Math.min(cursor.i, ns.length - 1);
+  const to   = r ? r.to   : from;
+  return from < ns.length ? { from, to: Math.min(to, ns.length - 1) } : null;
+}
+
+function copySelection(){
+  if (isRefSection()) return 0;
+  const span = clipSpan();
+  if (!span) return 0;
+
+  const slice = curNotes().slice(span.from, span.to + 1).map(n => {
+    const c = JSON.parse(JSON.stringify(n));
+    // bar-level marks anchor to the first note of a bar; pasting moves notes
+    // across barlines, so carrying them would put repeats in random places
+    c.brk = c.pageBrk = c.repStart = c.repEnd = false;
+    return c;
+  });
+  // a tie on the last note would sustain into whatever follows the paste
+  slice[slice.length - 1].tie = false;
+
+  writeClip(slice);
+  renderStatus();
+  return slice.length;
+}
+
+function cutSelection(){
+  if (isRefSection()) return;
+  const span = clipSpan();
+  const n = copySelection();
+  if (!n || !span) return;
+  pushUndo();
+  curNotes().splice(span.from, n);
+  selAnchor = null;
+  cursor.i = Math.min(span.from, curNotes().length);
+  pendingFret = null;
+  render();
+}
+
+// Paste inserts after the selection (or after the cursor note) and pushes
+// everything later to the right; the pasted notes end up selected, so pressing
+// paste again lays down another copy straight after this one.
+function pasteClipboard(){
+  if (isRefSection()) return;
+  const clip = readClip();
+  if (!clip || !clip.length) return;
+
+  const ns = curNotes();
+  const span = clipSpan();
+  const at = span ? span.to + 1 : 0;
+
+  pushUndo();
+  const copies = clip.map(n => newNote(JSON.parse(JSON.stringify(n))));
+  ns.splice(at, 0, ...copies);
+
+  selAnchor = copies.length > 1 ? at : null;
+  cursor.i = at + copies.length - 1;
+  pendingFret = null;
+  render();
+}
+
+/* ============================================================
+   Editing operations
+   ============================================================ */
+
+
+
+function ensureSlot(){
+  // Create a note at the cursor if we're sitting past the end.
+  const ns = curNotes();
+  if (cursor.i >= ns.length){
+    const n = newNote({ dur:entry.dur, dots:entry.dots, string:entry.string });
+    ns.push(n);
+    cursor.i = ns.length - 1;
+    return n;
+  }
+  return ns[cursor.i];
+}
+
+function typeDigit(d){
+  pushUndo();
+  const n = ensureSlot();
+  n.rest = false;
+  let v;
+  if (pendingFret !== null && pendingFret * 10 + d <= 24) v = pendingFret * 10 + d;
+  else v = d;
+  n.fret = v;
+  pendingFret = v;
+  entry.string = n.string;
+  render();
+}
+
+function moveCursor(delta, keepSel){
+  if (!keepSel) selAnchor = null;
+  const ns = curNotes();
+  let i = cursor.i + delta;
+  if (i < 0){
+    if (cursor.sec > 0){ cursor.sec--; cursor.i = Math.max(0, curNotes().length - 1); }
+    else cursor.i = 0;
+  } else if (i > ns.length){
+    if (cursor.sec < song.sections.length - 1){ cursor.sec++; cursor.i = 0; }
+    else cursor.i = ns.length;
+  } else {
+    cursor.i = i;
+  }
+  pendingFret = null;
+  const n = curNote();
+  if (n && !n.rest){ entry.string = n.string; entry.dur = n.dur; entry.dots = n.dots; }
+  render();
+}
+
+function setString(s){
+  const n = curNote();
+  entry.string = s;
+  if (n && !n.rest){ pushUndo(); n.string = s; n.spell = null; }
+  pendingFret = null;
+  render();
+}
+
+function nudgeString(delta){
+  const n = curNote();
+  const base = n && !n.rest ? n.string : entry.string;
+  setString(Math.max(0, Math.min(NSTR - 1, base + delta)));
+}
+
+function setDur(d){
+  pushUndo();
+  entry.dur = d;
+  const n = curNote();
+  if (n) n.dur = d;
+  render();
+}
+
+function toggleDot(){
+  pushUndo();
+  const n = curNote();
+  if (n){ n.dots = n.dots ? 0 : 1; entry.dots = n.dots; }
+  else entry.dots = entry.dots ? 0 : 1;
+  render();
+}
+
+function toggleDead(){
+  pushUndo();
+  const n = ensureSlot();
+  n.dead = !n.dead;
+  if (n.dead){ n.rest = false; n.tie = false; n.spell = null; }
+  pendingFret = null;
+  render();
+}
+
+// none → hammer/pull → slide → none
+function cycleLink(){
+  const n = curNote();
+  if (!n || n.rest) return;
+  pushUndo();
+  n.link = n.link === null ? "legato" : n.link === "legato" ? "slide" : null;
+  render();
+}
+
+// Replace the selected note with three of the next-smaller value, so the bar
+// still adds up: a quarter becomes three triplet eighths.
+function makeTriplet(){
+  const ns = curNotes();
+  const n = curNote();
+  if (!n) return;
+  if (n.tup) return unTriplet();
+
+  const d = SMALLER[n.dur];
+  if (!d) return;                       // nothing smaller to divide into
+  pushUndo();
+
+  const trio = [0,1,2].map(k => {
+    const c = newNote(JSON.parse(JSON.stringify(n)));
+    c.dur = d; c.dots = 0; c.tup = 3;
+    if (k > 0){
+      c.lyric = ""; c.chord = ""; c.tie = false; c.link = null;
+      c.brk = c.pageBrk = c.repStart = c.repEnd = false; c.ending = 0;
+    }
+    if (k < 2) c.tie = false;
+    return c;
+  });
+  ns.splice(cursor.i, 1, ...trio);
+  selAnchor = cursor.i;
+  cursor.i += 2;
+  pendingFret = null;
+  render();
+}
+
+function unTriplet(){
+  const ns = curNotes();
+  const n = curNote();
+  if (!n || !n.tup) return;
+
+  const run = tupletRuns(ns).find(r => cursor.i >= r.from && cursor.i <= r.to);
+  if (!run) return;
+  pushUndo();
+
+  const merged = newNote(JSON.parse(JSON.stringify(ns[run.from])));
+  merged.tup = 0;
+  merged.dur = BIGGER[merged.dur] || merged.dur;
+  ns.splice(run.from, run.to - run.from + 1, merged);
+  selAnchor = null;
+  cursor.i = run.from;
+  pendingFret = null;
+  render();
+}
+
+function toggleRest(){
+  pushUndo();
+  const n = ensureSlot();
+  n.rest = !n.rest;
+  if (n.rest) n.tie = false;
+  pendingFret = null;
+  render();
+}
+
+function toggleTie(){
+  const n = curNote();
+  if (!n || n.rest) return;
+  pushUndo();
+  n.tie = !n.tie;
+  // give the tied-to note the same pitch, so removing the tie leaves something sensible
+  const ns = curNotes();
+  if (n.tie && ns[cursor.i+1] && !ns[cursor.i+1].rest){
+    ns[cursor.i+1].string = n.string;
+    ns[cursor.i+1].fret = n.fret;
+  }
+  render();
+}
+
+function flipSpelling(){
+  const n = curNote();
+  if (!n || n.rest || !hasAltSpelling(n)) return;
+  pushUndo();
+  const pc = ((midiOf(n) % 12) + 12) % 12;
+  const t = names();
+  const cur = n.spell || (t.def[pc] === t.flat[pc] ? "flat" : "sharp");
+  n.spell = cur === "sharp" ? "flat" : "sharp";
+  render();
+}
+
+function deleteNote(){
+  const ns = curNotes();
+  if (!ns.length) return;
+  pushUndo();
+  const i = cursor.i >= ns.length ? ns.length - 1 : cursor.i;
+  ns.splice(i, 1);
+  cursor.i = Math.min(i, ns.length);
+  pendingFret = null;
+  render();
+}
+
+// Largest duration that fits in v quarter-notes.
+function fitDur(v){
+  for (const d of DUR_ORDER) if (DUR[d] <= v + 1e-9) return d;
+  return "s";
+}
+
+// Append one empty bar to the current section: first complete whatever bar is
+// half-finished, then add a full one, filled with rests of the current length.
+function addMeasure(){
+  if (isRefSection()) return;
+  pushUndo();
+  const ns = curNotes();
+  const cap = measureCapacity();
+  const unit = DUR[entry.dur] * (2 - Math.pow(0.5, entry.dots));
+  const total = ns.reduce((a, n) => a + noteBeats(n), 0);
+  let need = ((cap - (total % cap)) % cap) + cap;
+
+  const start = ns.length;
+  let guard = 0;
+  while (need > 1e-9 && guard++ < 400){
+    const d = fitDur(Math.min(unit, need));
+    ns.push(newNote({ dur:d, rest:true, string:entry.string }));
+    need -= DUR[d];
+  }
+  cursor.i = start;
+  pendingFret = null;
+  pendingFret = null;
+  render();
+}
+
+// One bar's worth of rests, using the currently selected note length.
+function barOfRests(){
+  const cap = measureCapacity();
+  const unit = DUR[entry.dur] * (2 - Math.pow(0.5, entry.dots));
+  const fill = [];
+  let need = cap, guard = 0;
+  while (need > 1e-9 && guard++ < 400){
+    const d = fitDur(Math.min(unit, need));
+    fill.push(newNote({ dur:d, rest:true, string:entry.string }));
+    need -= DUR[d];
+  }
+  return fill;
+}
+
+// Which note index does the cursor's bar end after?
+function endOfCurrentBar(){
+  const ns = curNotes();
+  if (!ns.length) return 0;
+  const target = Math.min(cursor.i, ns.length - 1);
+  const bars = splitMeasures(ns);
+  const bar = bars.find(m => m.idx.indexOf(target) >= 0);
+  return bar && bar.idx.length ? bar.idx[bar.idx.length - 1] + 1 : ns.length;
+}
+
+// Drop an empty bar in after the current one, pushing the rest of the section
+// to the right. Anchored to the bar rather than the note so the music after it
+// keeps its alignment to the barlines.
+function insertMeasure(){
+  if (isRefSection()) return;
+  pushUndo();
+  const ns = curNotes();
+  const at = endOfCurrentBar();
+  ns.splice(at, 0, ...barOfRests());
+  cursor.i = at;
+  pendingFret = null;
+  render();
+}
+
+// Start a new section straight after the selected note: everything past it
+// moves across. With the cursor at the end, this just adds an empty section.
+function splitSection(){
+  pushUndo();
+  const ns = curNotes();
+  const at = Math.min(cursor.i + 1, ns.length);
+  const moved = ns.splice(at);
+
+  const sec = newSection("");
+  sec.notes = moved;
+  song.sections.splice(cursor.sec + 1, 0, sec);
+  cursor.sec += 1;
+  cursor.i = 0;
+  pendingFret = null;
+  render();
+
+  const head = document.querySelector(`[data-sechead2="${cursor.sec}"]`);
+  if (head){ head.focus(); head.select(); }
+}
+
+// Remove the bar the cursor is in. Everything after it shifts back, so the
+// remaining notes re-bar themselves.
+function deleteMeasure(){
+  if (isRefSection()) return;
+  const sec = curSection();
+  const ns = sec.notes;
+  if (!ns.length) return;
+
+  const target = Math.min(cursor.i, ns.length - 1);
+  const bars = splitMeasures(ns);
+  const bi = bars.findIndex(m => m.idx.indexOf(target) >= 0);
+  if (bi < 0 || !bars[bi].idx.length) return;
+
+  const first = bars[bi].idx[0], count = bars[bi].idx.length;
+  const flags = ns[first];
+  const notes = bars[bi].idx.filter(i => !ns[i].rest).length;
+  if (notes && !confirm(`Delete this bar and the ${notes} note${notes>1?"s":""} in it?`)) return;
+
+  pushUndo();
+
+  // Hand bar-level settings to a neighbour rather than losing them silently:
+  // "starts here" moves to the bar that takes this one's place, "closes here"
+  // falls back to the bar before it.
+  const after = ns[first + count];
+  if (after){
+    if (flags.brk) after.brk = true;
+    if (flags.pageBrk) after.pageBrk = true;
+    if (flags.repStart) after.repStart = true;
+  }
+  if (flags.repEnd && bi > 0){
+    const prev = ns[bars[bi-1].idx[0]];
+    if (prev){ prev.repEnd = true; prev.repTimes = flags.repTimes; }
+  }
+
+  ns.splice(first, count);
+  cursor.i = Math.min(first, ns.length);
+  pendingFret = null;
+  render();
+}
+
+function toggleBreak(){
+  const a = anchorNote();
+  if (!a) return;
+  pushUndo();
+  a.brk = !a.brk;
+  render();
+}
+
+// none → 1st time → 2nd time → 3rd time → none
+function cycleEnding(){
+  const a = anchorNote();
+  if (!a) return;
+  pushUndo();
+  a.ending = (a.ending || 0) >= 3 ? 0 : (a.ending || 0) + 1;
+  render();
+}
+
+function togglePageBreak(){
+  pushUndo();
+  const a = anchorNote();
+  if (a) a.pageBrk = !a.pageBrk;         // break before this bar
+  else {
+    const sec = curSection();             // reference or empty section: no bars
+    if (!sec) return;
+    sec.pageBrk = !sec.pageBrk;
+  }
+  render();
+}
+
+// Is a page break set for wherever the cursor is?
+function pageBreakHere(){
+  const a = anchorNote();
+  return a ? !!a.pageBrk : !!(curSection() && curSection().pageBrk);
+}
+
+function toggleRepeat(which){
+  const a = anchorNote();
+  if (!a) return;
+  pushUndo();
+  a[which] = !a[which];
+  if (a.repEnd && !(a.repTimes >= 2)) a.repTimes = 2;
+  render();
+}
+
+function setRepTimes(v){
+  const a = anchorNote();
+  if (!a) return;
+  a.repTimes = Math.max(2, Math.min(99, Math.round(+v) || 2));
+  render();
+}
+
+function addSection(ref){
+  pushUndo();
+  song.sections.push(newSection("", ref));
+  cursor.sec = song.sections.length - 1;
+  cursor.i = 0;
+  render();
+  const inputs = document.querySelectorAll("[data-sechead2]");
+  const last = inputs[inputs.length-1];
+  if (last){ last.focus(); last.select(); }
+}
+
+/* ============================================================
+   Events — keyboard
+   ============================================================ */
+
+const NOTE_KEYS = new Set([
+  "0","1","2","3","4","5","6","7","8","9",
+  "w","h","q","e","s",".",
+  "r","R","t","T","n","N","l","L","c","C",
+  "m","M","i","I","[","]","x","X","-","_","T","v","V","Enter","Backspace","Delete"
+]);
+
+function inField(el){
+  return el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+}
+
+document.addEventListener("keydown", e => {
+  const k = e.key;
+
+  if ((e.metaKey || e.ctrlKey) && k === "Enter"){ e.preventDefault(); togglePlayback(); return; }
+
+  // Inside a text box these belong to the browser, so only claim them on the score.
+  if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === "l"){ e.preventDefault(); toggleLoop(); return; }
+
+  if ((e.metaKey || e.ctrlKey) && !inField(document.activeElement)){
+    const c = k.toLowerCase();
+    if (c === "a"){ e.preventDefault(); selectSection(); return; }
+    if (c === "c"){ e.preventDefault(); copySelection(); return; }
+    if (c === "x"){ e.preventDefault(); cutSelection(); return; }
+    if (c === "v"){ e.preventDefault(); pasteClipboard(); return; }
+  }
+  if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === "s"){ e.preventDefault(); saveFile(); return; }
+  if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === "z"){
+    e.preventDefault();
+    e.shiftKey ? redo() : undo();
+    return;
+  }
+  if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === "p"){ return; }
+
+  // Chord and lyric fields: space / enter / tab move to the next note and keep
+  // typing, so a whole line can be entered without reaching for the mouse.
+  const af = document.activeElement;
+  if (af && (af.id === "lyricInput" || af.id === "chordInput")){
+    const id = af.id, key = id === "chordInput" ? "chord" : "lyric";
+    if (k === "Enter" || k === "Tab" || (k === " " && !e.shiftKey)){
+      e.preventDefault();
+      commitText(key, af.value);
+      moveCursor(1);
+      const el = $("#" + id);
+      if (el){ el.focus(); el.select(); }
+    } else if (k === "Escape"){
+      af.blur();
+    }
+    return;
+  }
+
+  if (inField(document.activeElement)){
+    if (k === "Escape") document.activeElement.blur();
+    return;
+  }
+  if (k === "Escape" && isPlaying()){ e.preventDefault(); stopPlayback(); return; }
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  // A reference section shows its name only, so notation edits would be invisible.
+  if (isRefSection() && NOTE_KEYS.has(k)){ e.preventDefault(); return; }
+
+  if (k >= "0" && k <= "9"){ e.preventDefault(); typeDigit(+k); return; }
+
+  switch (k){
+    case "ArrowUp":    e.preventDefault(); nudgeString(+1); break;
+    case "ArrowDown":  e.preventDefault(); nudgeString(-1); break;
+    case "ArrowRight":
+    case "ArrowLeft": {
+      e.preventDefault();
+      const d = k === "ArrowRight" ? 1 : -1;
+      if (e.shiftKey){
+        // extend the selection, staying inside this section
+        const ns = curNotes();
+        if (ns.length){
+          if (selAnchor === null) selAnchor = Math.min(cursor.i, ns.length - 1);
+          cursor.i = Math.max(0, Math.min(cursor.i + d, ns.length - 1));
+          render();
+        }
+      } else {
+        moveCursor(d);
+      }
+      break;
+    }
+    case " ":          e.preventDefault(); moveCursor(+1); break;
+    case "Backspace":
+    case "Delete":     e.preventDefault(); deleteNote(); break;
+    case ".":          e.preventDefault(); toggleDot(); break;
+    case "r": case "R": e.preventDefault(); toggleRest(); break;
+    case "x": case "X": e.preventDefault(); toggleDead(); break;
+    case "T":           e.preventDefault(); makeTriplet(); break;
+    case "v": case "V": e.preventDefault(); cycleEnding(); break;
+    case "-": case "_": e.preventDefault(); cycleLink(); break;
+    case "t": case "T": e.preventDefault(); toggleTie(); break;
+    case "n": case "N": e.preventDefault(); flipSpelling(); break;
+    case "m":           e.preventDefault(); addMeasure(); break;
+    case "M":           e.preventDefault(); deleteMeasure(); break;
+    case "i": case "I": e.preventDefault(); insertMeasure(); break;
+    case "p": case "P": e.preventDefault(); togglePageBreak(); break;
+    case "S":           e.preventDefault(); splitSection(); break;
+    case "[":           e.preventDefault(); toggleRepeat("repStart"); break;
+    case "]":           e.preventDefault(); toggleRepeat("repEnd"); break;
+    case "Enter":       e.preventDefault(); e.shiftKey ? toggleBreak() : addMeasure(); break;
+    case "c": case "C": {
+      e.preventDefault();
+      if (!curNote()) ensureSlot();
+      render();
+      const el = $("#chordInput");
+      if (el){ el.focus(); el.select(); }
+      break;
+    }
+    case "l": case "L": {
+      e.preventDefault();
+      if (!curNote()) ensureSlot();
+      render();
+      const el = $("#lyricInput");
+      if (el){ el.focus(); el.select(); }
+      break;
+    }
+    default:
+      if (DUR[k]){ e.preventDefault(); setDur(k); }
+  }
+});
+
+function commitText(key, v){
+  const n = curNote();
+  if (!n) return;
+  if (n[key] !== v){ pushUndo(tagFor(key)); n[key] = v; }
+}
+
+/* ============================================================
+   Events — mouse & fields
+   ============================================================ */
+
+$("#page").addEventListener("mousedown", e => {
+  const t = e.target;
+  if (t.dataset && t.dataset.sec !== undefined && t.dataset.i !== undefined){
+    const sameSection = +t.dataset.sec === cursor.sec;
+    if (e.shiftKey && sameSection){
+      if (selAnchor === null) selAnchor = cursor.i;
+    } else {
+      selAnchor = null;
+    }
+    cursor.sec = +t.dataset.sec;
+    cursor.i   = +t.dataset.i;
+    pendingFret = null;
+    if (e.shiftKey && sameSection){ render(); return; }
+    if (t.dataset.str !== undefined) setString(+t.dataset.str);
+    else {
+      const n = curNote();
+      if (n && !n.rest){ entry.string = n.string; entry.dur = n.dur; entry.dots = n.dots; }
+      render();
+    }
+    return;
+  }
+  const sec = t.closest && t.closest(".section");
+  if (sec && !t.dataset.sechead){ cursor.sec = +sec.dataset.sec; renderSidebar(); renderStatus(); }
+});
+
+$("#page").addEventListener("input", e => {
+  const i = e.target.dataset.sechead;
+  if (i !== undefined){
+    pushUndo("heading" + i);
+    song.sections[+i].heading = e.target.value;
+    const mirror = document.querySelector(`[data-sechead2="${i}"]`);
+    if (mirror) mirror.value = e.target.value;
+    persist();
+  }
+});
+
+// render() rebuilds the inspector, which would drop focus after the first
+// keystroke in a text field — so put the caret back where it was.
+function renderKeepFocus(){
+  const el = document.activeElement;
+  const key = el && el.dataset ? Object.keys(el.dataset)[0] : null;
+  const start = el && el.selectionStart, end = el && el.selectionEnd;
+  render();
+  if (!key) return;
+  const again = document.querySelector(`.sidebar [data-${key.toLowerCase()}]`);
+  if (!again) return;
+  again.focus();
+  try { again.setSelectionRange(start, end); } catch(e){ /* number inputs */ }
+}
+
+document.querySelector(".sidebar").addEventListener("input", e => {
+  const d = e.target.dataset;
+  if (d.sechead2 !== undefined){
+    pushUndo("heading" + d.sechead2);
+    song.sections[+d.sechead2].heading = e.target.value;
+    const mirror = document.querySelector(`[data-sechead="${d.sechead2}"]`);
+    if (mirror) mirror.value = e.target.value;
+    persist();
+    return;
+  }
+  if (d.str !== undefined){ setString(+e.target.value); return; }
+  if (d.fret !== undefined){
+    const n = curNote();
+    if (n){
+      pushUndo(tagFor("fret"));
+      n.fret = Math.max(0, Math.min(24, +e.target.value || 0));
+      n.spell = null;
+      renderKeepFocus();
+    }
+    return;
+  }
+  if (d.reptimes !== undefined){
+    const a = anchorNote();
+    if (a){
+      pushUndo(tagFor("reptimes"));
+      a.repTimes = Math.max(2, Math.min(99, Math.round(+e.target.value) || 2));
+    }
+    renderKeepFocus();
+    return;
+  }
+  if (d.chord !== undefined){
+    const n = curNote();
+    if (n){ pushUndo(tagFor("chord")); n.chord = e.target.value; renderKeepFocus(); }
+    return;
+  }
+  if (d.lyric !== undefined){
+    const n = curNote();
+    if (n){ pushUndo(tagFor("lyric")); n.lyric = e.target.value; render(); const el = $("#lyricInput"); if (el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
+    return;
+  }
+});
+
+document.querySelector(".sidebar").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  const d = b.dataset;
+  if (d.dur !== undefined) return setDur(d.dur);
+  if (d.dot !== undefined) return toggleDot();
+  if (d.rest !== undefined) return toggleRest();
+  if (d.dead !== undefined) return toggleDead();
+  if (d.link !== undefined){
+    const n = curNote();
+    if (n && !n.rest){ pushUndo(); n.link = d.link || null; render(); }
+    return;
+  }
+  if (d.tie !== undefined) return toggleTie();
+  if (d.spell !== undefined) return flipSpelling();
+  if (d.brk !== undefined) return toggleBreak();
+  if (d.tup !== undefined) return makeTriplet();
+  if (d.ending !== undefined) return cycleEnding();
+  if (d.pagebrk !== undefined) return togglePageBreak();
+  if (d.repstart !== undefined) return toggleRepeat("repStart");
+  if (d.repend !== undefined) return toggleRepeat("repEnd");
+  if (d.del !== undefined) return deleteNote();
+  if (d.secref !== undefined){
+    pushUndo();
+    const sec = song.sections[+d.secref];
+    sec.ref = !sec.ref;
+    cursor.sec = +d.secref;
+    cursor.i = 0;
+    return render();
+  }
+  if (d.secdel !== undefined){
+    const i = +d.secdel;
+    if (song.sections.length === 1) return;
+    if (song.sections[i].notes.length && !confirm(`Delete section "${song.sections[i].heading || i+1}" and its ${song.sections[i].notes.length} notes?`)) return;
+    pushUndo();
+    song.sections.splice(i, 1);
+    clampCursor();
+    return render();
+  }
+  if (d.secup !== undefined){
+    const i = +d.secup;
+    if (i === 0) return;
+    pushUndo();
+    [song.sections[i-1], song.sections[i]] = [song.sections[i], song.sections[i-1]];
+    if (cursor.sec === i) cursor.sec = i-1; else if (cursor.sec === i-1) cursor.sec = i;
+    return render();
+  }
+  if (d.secdown !== undefined){
+    const i = +d.secdown;
+    if (i >= song.sections.length - 1) return;
+    pushUndo();
+    [song.sections[i+1], song.sections[i]] = [song.sections[i], song.sections[i+1]];
+    if (cursor.sec === i) cursor.sec = i+1; else if (cursor.sec === i+1) cursor.sec = i;
+    return render();
+  }
+});
+
+$("#btnAddSection").addEventListener("click", () => addSection(false));
+$("#btnAddRef").addEventListener("click", () => addSection(true));
+$("#btnSketch").addEventListener("click", () => {
+  const el = $("#fSketch");
+  const n = applySketch(el.value);
+  if (n) el.value = "";
+});
+$("#btnAddMeasure").addEventListener("click", addMeasure);
+$("#btnDelMeasure").addEventListener("click", deleteMeasure);
+$("#btnInsMeasure").addEventListener("click", insertMeasure);
+$("#btnSplitSection").addEventListener("click", splitSection);
+
+/* ---------- song fields ---------- */
+$("#fTitle").addEventListener("input", e => { pushUndo("title"); song.title = e.target.value; render(); });
+$("#fArtist").addEventListener("input", e => { pushUndo("artist"); song.artist = e.target.value; render(); });
+$("#fTime").addEventListener("change", e => {
+  pushUndo();
+  const [b, u] = e.target.value.split("/").map(Number);
+  song.timeSig = { beats:b, unit:u };
+  render();
+});
+$("#fOct").addEventListener("change", e => { pushUndo(); song.octaves = e.target.value; render(); });
+$("#fBars").addEventListener("change", e => { pushUndo(); song.barsPerLine = e.target.value; render(); });
+$("#fNaming").addEventListener("change", e => { pushUndo(); song.naming = e.target.value; render(); });
+
+function syncFields(){
+  $("#fTitle").value  = song.title === "Untitled" ? "" : song.title;
+  $("#fArtist").value = song.artist;
+  $("#fTime").value   = `${song.timeSig.beats}/${song.timeSig.unit}`;
+  $("#fBars").value   = song.barsPerLine || "auto";
+  $("#fNaming").value = song.naming || "nl";
+  $("#fTempo").value  = song.tempo || 90;
+  $("#fRepeats").checked = song.followRepeats !== false;
+  $("#fOct").value    = song.octaves || "off";
+}
+
+/* ============================================================
+   File I/O
+   ============================================================ */
+
+function saveFile(){
+  const name = (song.title && song.title !== "Untitled" ? song.title : "bass-transcription")
+    .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const blob = new Blob([JSON.stringify(song, null, 2)], { type:"application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name + ".json";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  $("#saveState").textContent = "saved to file";
+}
+
+function loadSong(obj){
+  if (!obj || !Array.isArray(obj.sections)) throw new Error("Not a transcription file");
+  song = {
+    version: 1,
+    title: obj.title || "Untitled",
+    artist: obj.artist || "",
+    timeSig: obj.timeSig || { beats:4, unit:4 },
+    naming: obj.naming || "nl",
+    tempo: Math.max(30, Math.min(300, +obj.tempo || 90)),
+    followRepeats: obj.followRepeats !== false,
+    barsPerLine: obj.barsPerLine || "auto",
+    // older files carried a plain on/off flag
+    // honour whatever the file recorded — including the old on/off flag —
+    // and fall back to the default only when it says nothing at all
+    octaves: obj.octaves || ("showOctave" in obj ? (obj.showOctave ? "spn" : "off") : DEFAULT_OCTAVES),
+    sections: obj.sections.map(s => ({
+      heading: s.heading || "",
+      ref: !!s.ref,
+      pageBrk: !!s.pageBrk,
+      notes: (s.notes || []).map(n => newNote(n))
+    }))
+  };
+  if (!song.sections.length) song.sections = [newSection("")];
+  cursor = { sec:0, i:0 };
+  undoStack = [];
+  syncFields();
+  render();
+}
+
+$("#btnOpen").addEventListener("click", () => $("#fileInput").click());
+$("#fileInput").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try { loadSong(JSON.parse(r.result)); }
+    catch (err){ alert("Could not open that file:\n" + err.message); }
+  };
+  r.readAsText(f);
+  e.target.value = "";
+});
+
+$("#btnSave").addEventListener("click", saveFile);
+$("#btnPrint").addEventListener("click", () => { stopPlayback(); window.print(); });
+$("#btnPlay").addEventListener("click", togglePlayback);
+$("#btnLoop").addEventListener("click", toggleLoop);
+$("#fRate").addEventListener("change", e => setRate(+e.target.value / 100));
+$("#fRepeats").addEventListener("change", e => {
+  song.followRepeats = e.target.checked;
+  persist();
+});
+$("#fTempo").addEventListener("input", e => {
+  pushUndo("tempo");
+  song.tempo = Math.max(30, Math.min(300, +e.target.value || 90));
+  persist();
+});
+$("#btnUndo").addEventListener("click", undo);
+$("#btnRedo").addEventListener("click", redo);
+$("#btnNew").addEventListener("click", () => {
+  if (!confirm("Start a new, empty transcription? Save first if you want to keep this one.")) return;
+  pushUndo();
+  song = { version:1, title:"Untitled", artist:"", timeSig:{beats:4,unit:4}, naming:"nl", tempo:90, followRepeats:true, barsPerLine:"auto", octaves:DEFAULT_OCTAVES, sections:[newSection("Intro")] };
+  cursor = { sec:0, i:0 };
+  syncFields();
+  render();
+});
+
+/* ============================================================
+   Boot
+   ============================================================ */
+
+try{
+  // Go through loadSong so a restored autosave gets the same field migration
+  // as a file you open by hand.
+  const saved = localStorage.getItem(LS_KEY);
+  if (saved) loadSong(JSON.parse(saved));
+}catch(e){ /* keep the starting song */ }
+
+loadPrefs();
+syncFields();
+render();
+updateTransport();
+</script>
+</body>
+</html>
