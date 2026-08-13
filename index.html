@@ -95,6 +95,11 @@
   }
   .lede{ font-size:1.1875rem; color:var(--graphite); line-height:1.62; }
   .note{ font-size:.9375rem; color:var(--graphite); }
+  .link{
+    color:var(--ink); text-decoration:underline;
+    text-decoration-color:var(--rule); text-underline-offset:3px;
+  }
+  .link:hover{ text-decoration-color:var(--mark); text-decoration-thickness:2px; }
 
   .mark{
     color:var(--mark-ink);
@@ -438,6 +443,10 @@
           Built for my own transcriptions, then tidied up in case it's useful to
           anyone else. It's free. If it saves you an evening, that's payment enough.
         </p>
+        <p class="note" style="margin-top:14px">
+          Found something broken, or does this way of writing work for you?
+          <span id="contact"><a class="link" href="https://github.com/ubrowz/threeline/issues">open an issue on GitHub</a></span>.
+        </p>
       </div>
       <div class="actions" style="margin:0">
         <a class="btn" href="bass-notation.html">Open the editor</a>
@@ -447,6 +456,24 @@
 </footer>
 
 <script>
+(function(){
+  // Put together at run time rather than written out, so the address is not
+  // sitting in the page source for a scraper to lift. Without JavaScript the
+  // GitHub link stays, so nobody is left with no way to get in touch.
+  var flip = function(s){ return s.split("").reverse().join(""); };
+  var addr = flip("cxww1a1r8") + "@" + flip("moc.liamzom");
+  var slot = document.getElementById("contact");
+  if (slot){
+    var mail = document.createElement("a");
+    mail.className = "link";
+    mail.href = "mailto:" + addr;
+    mail.textContent = addr;
+    var gh = slot.querySelector("a").cloneNode(true);
+    slot.textContent = "";
+    slot.append(mail, " — or ", gh);
+  }
+})();
+
 (function(){
   var PLAN = {"events":[{"t":0,"d":0.625,"m":33,"x":0,"s":0,"f":0,"i":0},{"t":0.625,"d":0.3125,"m":33,"x":1,"s":0,"f":0,"i":1},{"t":0.9375,"d":0.3125,"m":33,"x":0,"s":0,"f":0,"i":2},{"t":1.25,"d":0.2083,"m":33,"x":0,"s":0,"f":0,"i":3},{"t":1.4583,"d":0.2083,"m":35,"x":0,"s":0,"f":0,"i":4},{"t":1.6667,"d":0.2083,"m":36,"x":0,"s":0,"f":0,"i":5},{"t":2.1875,"d":0.3125,"m":35,"x":0,"s":0,"f":0,"i":7},{"t":2.5,"d":0.9375,"m":36,"x":0,"s":1,"f":35,"i":8},{"t":3.4375,"d":0.3125,"m":38,"x":0,"s":0,"f":0,"i":9},{"t":3.75,"d":1.25,"m":40,"x":0,"s":1,"f":0,"i":10},{"t":5,"d":0.625,"m":33,"x":0,"s":0,"f":0,"i":0},{"t":5.625,"d":0.3125,"m":33,"x":1,"s":0,"f":0,"i":1},{"t":5.9375,"d":0.3125,"m":33,"x":0,"s":0,"f":0,"i":2},{"t":6.25,"d":0.2083,"m":33,"x":0,"s":0,"f":0,"i":3},{"t":6.4583,"d":0.2083,"m":35,"x":0,"s":0,"f":0,"i":4},{"t":6.6667,"d":0.2083,"m":36,"x":0,"s":0,"f":0,"i":5},{"t":7.1875,"d":0.3125,"m":35,"x":0,"s":0,"f":0,"i":7},{"t":7.5,"d":0.9375,"m":36,"x":0,"s":1,"f":35,"i":8},{"t":8.4375,"d":0.3125,"m":38,"x":0,"s":0,"f":0,"i":9},{"t":8.75,"d":1.25,"m":40,"x":0,"s":1,"f":0,"i":10}],"steps":[{"t":0,"i":0},{"t":0.625,"i":1},{"t":0.9375,"i":2},{"t":1.25,"i":3},{"t":1.4583,"i":4},{"t":1.6667,"i":5},{"t":1.875,"i":6},{"t":2.1875,"i":7},{"t":2.5,"i":8},{"t":3.4375,"i":9},{"t":3.75,"i":10},{"t":4.375,"i":11},{"t":5,"i":0},{"t":5.625,"i":1},{"t":5.9375,"i":2},{"t":6.25,"i":3},{"t":6.4583,"i":4},{"t":6.6667,"i":5},{"t":6.875,"i":6},{"t":7.1875,"i":7},{"t":7.5,"i":8},{"t":8.4375,"i":9},{"t":8.75,"i":10},{"t":9.375,"i":11}],"total":10};
 
