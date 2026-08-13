@@ -894,13 +894,15 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
     const y = stringY(st);
     s += `<line x1="0" y1="${y}" x2="${sys.width}" y2="${y}" stroke="#9aa0a8" stroke-width="1"/>`;
   }
+  // Where every note on this line sits. A note not in here is on another line,
+  // which is what ties and hammer marks have to cope with.
+  const pos = new Map();
+  for (const mm of sys.measures)
+    for (const it of mm.items)
+      pos.set(it.i, mm.x + it.x + it.w / 2);
+
   // ---- triplet brackets, just above the beams ----------------------
   if (showTups){
-    const pos = new Map();
-    for (const mm of sys.measures)
-      for (const it of mm.items)
-        pos.set(it.i, mm.x + it.x + it.w / 2);
-
     for (const run of tupletRuns(notes)){
       const a = pos.get(run.from), b = pos.get(run.to);
       if (a === undefined || b === undefined) continue;   // split across lines
@@ -1019,16 +1021,24 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
           s += `<circle cx="${cx + 11 + d*4.5}" cy="${HEAD_Y-4.5}" r="1.9" fill="#111"/>`;
       }
 
-      // Centre of the following note, if it is on this system.
-      const nextX = () => {
-        const nxt = m.items.find(o => o.i === it.i + 1);
-        if (nxt) return m.x + nxt.x + nxt.w/2;
-        const nm = sys.measures[sys.measures.indexOf(m) + 1];
-        const first = nm && nm.items[0];
-        return (first && first.i === it.i + 1) ? nm.x + first.x + first.w/2 : null;
-      };
+      // Where the connector runs to. If the following note is on the next line,
+      // it stops at the margin instead of not being drawn at all — otherwise a
+      // tie or a hammer mark silently vanishes whenever a line break lands
+      // between the two notes.
+      const carries = !pos.has(it.i + 1) && !!notes[it.i + 1];
+      const nextX = () => pos.has(it.i + 1) ? pos.get(it.i + 1)
+                        : carries ? sys.width - 4 : null;
 
-      // --- tie / slur to the next note (same system only) ---
+      // The other half of a connector that started on the line above.
+      const prev = notes[it.i - 1];
+      if (prev && !pos.has(it.i - 1) && (prev.tie || prev.link)){
+        const y0 = HEAD_Y + 7.5, from = Math.max(2, cx - 26);
+        s += `<path d="M${from},${y0} Q${(from+cx)/2},${y0+8} ${cx},${y0}" `
+           + `stroke="#111" stroke-width="${prev.tie ? 1.4 : 1.1}" fill="none"`
+           + (prev.tie ? "" : ` opacity="0.75"`) + `/>`;
+      }
+
+      // --- tie / slur to the next note ---
       if (n.tie){
         const x2 = nextX();
         if (x2 !== null){
@@ -1049,7 +1059,7 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
             s += `<line x1="${mid-5.5}" y1="${y + 3.6*up}" x2="${mid+5.5}" y2="${y - 3.6*up}" `
                + `stroke="#111" stroke-width="1.5"/>`;
           } else {
-            const letter = midiOf(link) > midiOf(n) ? "h" : "p";
+            const letter = midiOf(link) >= midiOf(n) ? "h" : "p";
             s += `<rect x="${mid-4.6}" y="${y-6.5}" width="9.2" height="13" fill="${selected?"#fff2c9":"#fff"}"/>`
                + `<text x="${mid}" y="${y+4}" text-anchor="middle" font-size="10.5" font-weight="700" `
                + `font-style="italic" font-family="system-ui,-apple-system,sans-serif" fill="#111">${letter}</text>`;
