@@ -1,0 +1,523 @@
+<!--
+  Threeline — a bass transcription editor.
+  https://github.com/ubrowz/threeline
+
+  Copyright (c) 2026 Joep Rous. Released under the MIT licence: use it,
+  change it, pass it on, sell it — just keep this notice with it.
+  Full text: https://github.com/ubrowz/threeline/blob/main/LICENSE
+-->
+<title>Threeline Bass Notation</title>
+<style>
+  /* ---------------------------------------------------------------
+     Palette taken from the source material: graphite on cool paper,
+     with the editor's own selection yellow as the one bold mark.
+     --------------------------------------------------------------- */
+  :root{
+    --paper:      #EFF1F5;
+    --card:       #FFFFFF;
+    --ink:        #14171D;
+    --graphite:   #59616F;
+    --rule:       #C6CCD7;
+    --rule-soft:  #DDE1E8;
+    --mark:       #F5C542;
+    --mark-h:     78%;
+    --mark-ink:   #14171D;
+    --shadow:     0 1px 2px rgba(20,23,29,.10), 0 14px 40px rgba(20,23,29,.09);
+
+    --display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+    --measure: 66ch;
+    --wide: 1080px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:     #13161B;
+      --card:      #1A1E25;
+      --ink:       #E7EAF0;
+      --graphite:  #98A1B1;
+      --rule:      #2E343E;
+      --rule-soft: #232830;
+      --mark:      #E9BE3F;
+      --mark-h:    78%;
+      --mark-ink:  #13161B;
+      --shadow:    0 1px 2px rgba(0,0,0,.5), 0 18px 44px rgba(0,0,0,.44);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:     #13161B;
+    --card:      #1A1E25;
+    --ink:       #E7EAF0;
+    --graphite:  #98A1B1;
+    --rule:      #2E343E;
+    --rule-soft: #232830;
+    --mark:      #E9BE3F;
+    --mark-h:    78%;
+    --mark-ink:  #13161B;
+    --shadow:    0 1px 2px rgba(0,0,0,.5), 0 18px 44px rgba(0,0,0,.44);
+  }
+
+  *{ box-sizing:border-box; }
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--body);
+    font-size:1.0625rem;
+    line-height:1.7;
+    -webkit-font-smoothing:antialiased;
+  }
+  img{ max-width:100%; display:block; }
+  a{ color:inherit; }
+  :focus-visible{ outline:2.5px solid var(--mark); outline-offset:3px; border-radius:2px; }
+
+  .wrap{ max-width:var(--wide); margin:0 auto; padding:0 24px; }
+  .col{ max-width:var(--measure); }
+
+  /* ---- type ---- */
+  h1,h2,h3{ font-family:var(--display); font-weight:600; text-wrap:balance; margin:0; }
+  h1{ font-size:clamp(2.5rem, 6.4vw, 4.25rem); line-height:1.02; letter-spacing:-.02em; }
+  h2{ font-size:clamp(1.45rem, 3vw, 2rem); line-height:1.15; letter-spacing:-.01em; }
+  h3{ font-size:1.0625rem; font-weight:600; letter-spacing:0; }
+  p{ margin:0; }
+
+  /* an expression mark, the way printed music sets them */
+  .eyebrow{
+    font-family:var(--display); font-style:italic; font-size:1rem;
+    color:var(--graphite); letter-spacing:.01em; margin:0 0 18px;
+  }
+  .lede{ font-size:1.1875rem; color:var(--graphite); line-height:1.62; }
+  .note{ font-size:.9375rem; color:var(--graphite); }
+
+  .mark{
+    color:var(--mark-ink);
+    padding:0 .1em; margin:0 -.1em;
+    background-image:linear-gradient(var(--mark), var(--mark));
+    background-repeat:no-repeat;
+    background-position:0 62%;
+    background-size:0 var(--mark-h);
+    animation:sweep .72s cubic-bezier(.42,0,.18,1) .4s forwards;
+  }
+  @keyframes sweep{ to{ background-size:100% var(--mark-h); } }
+
+  kbd{
+    font-family:var(--mono); font-size:.8125em; font-weight:600;
+    border:1px solid var(--rule); border-bottom-width:2px; border-radius:4px;
+    padding:1px 5px; background:var(--card); white-space:nowrap;
+  }
+
+  /* ---- hero ---- */
+  header{ padding:clamp(64px,11vh,120px) 0 8px; }
+  .rise{ animation:rise .8s cubic-bezier(.22,1,.3,1) both; }
+  .rise:nth-child(2){ animation-delay:.06s; }
+  .rise:nth-child(3){ animation-delay:.12s; }
+  @keyframes rise{ from{ opacity:0; transform:translateY(14px); } to{ opacity:1; transform:none; } }
+
+  .actions{ display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-top:34px; }
+  .btn{
+    font:600 1rem/1 var(--body); text-decoration:none;
+    padding:14px 22px; border-radius:8px; border:1.5px solid var(--ink);
+    background:var(--ink); color:var(--paper);
+    transition:transform .12s ease, opacity .12s ease;
+  }
+  .btn:hover{ transform:translateY(-1px); opacity:.9; }
+  .btn.ghost{ background:transparent; color:var(--ink); }
+  .btn.ghost:hover{ background:var(--card); }
+
+  /* ---- plates: the paper, then the screen ---- */
+  .plates{ display:grid; gap:14px; margin:clamp(48px,8vw,80px) 0 0; }
+  figure{ margin:0; }
+  .plate{
+    background:var(--card); border:1px solid var(--rule-soft);
+    border-radius:10px; padding:clamp(14px,2.4vw,26px); box-shadow:var(--shadow);
+  }
+  .plate img{ border-radius:4px; width:100%; }
+  .plate.solo{ margin-top:clamp(34px,5vw,52px); }
+
+  /* the notation is the editor's own output, dropped in as SVG */
+  .steps{
+    margin-top:clamp(30px,4.5vw,48px);
+    display:grid; gap:clamp(20px,3vw,30px);
+    list-style:none; padding:0; margin-bottom:0; counter-reset:step;
+  }
+  .step > h3{
+    font-family:var(--display); font-style:italic; font-size:1.0625rem;
+    color:var(--graphite); font-weight:600; margin:0 0 10px;
+    display:flex; align-items:baseline; gap:10px;
+  }
+  .step > h3::before{
+    counter-increment:step; content:counter(step);
+    font-family:var(--mono); font-style:normal; font-size:.75rem; font-weight:700;
+    color:#14171D; background:var(--mark);
+    width:20px; height:20px; border-radius:50%;
+    display:inline-grid; place-items:center; flex:0 0 auto;
+    transform:translateY(3px);
+  }
+  .sketchbox{
+    font-family:var(--mono); font-size:.9375rem; line-height:1.6; margin:0;
+    background:var(--card); color:var(--ink);
+    border:1px solid var(--rule-soft); border-radius:8px;
+    padding:15px 18px; overflow-x:auto;
+  }
+
+  .sheet{
+    background:#FFFFFF; border:1px solid #E4E7EC; border-radius:6px;
+    padding:14px clamp(10px,2vw,20px) 10px;
+  }
+  .demo svg{ width:100%; height:auto; display:block; overflow:visible; }
+  .demo .hit, .demo .hitstr{ fill:transparent; }
+  .demo .hit.playing{ fill:rgba(245,197,66,.34); }
+  .demo-bar{ margin:0 0 14px; align-items:center; }
+  .btn.sm{
+    font-size:.9375rem; padding:9px 15px; border-radius:7px;
+    display:inline-flex; align-items:center; gap:9px; cursor:pointer;
+  }
+  .btn.sm .tri{
+    width:0; height:0; border-left:9px solid currentColor;
+    border-top:6px solid transparent; border-bottom:6px solid transparent;
+  }
+  .btn.sm.playing .tri{
+    border:0; width:9px; height:10px; background:currentColor;
+  }
+  figcaption{
+    font-size:.875rem; color:var(--graphite); margin-top:12px;
+    display:flex; gap:10px; align-items:baseline;
+  }
+  figcaption b{
+    font-family:var(--display); font-style:italic; font-weight:600;
+    color:var(--ink); flex:0 0 auto;
+  }
+  .arrow{
+    justify-self:center; color:var(--graphite); font-size:1.25rem; line-height:1;
+    padding:2px 0;
+  }
+  @media (min-width:920px){
+    .plates{ grid-template-columns:1fr auto 1fr; align-items:center; gap:20px; }
+    .arrow{ padding:0 4px; }
+  }
+
+  /* ---- the three rows, set the way the notation is ---- */
+  section{ padding:clamp(64px,10vw,112px) 0 0; }
+  .rows{ margin-top:clamp(32px,5vw,52px); border-top:1px solid var(--rule); }
+  .row{
+    display:grid; gap:6px 40px; padding:26px 0;
+    border-bottom:1px solid var(--rule);
+  }
+  @media (min-width:760px){
+    .row{ grid-template-columns:180px 1fr; gap:0 48px; padding:30px 0; }
+  }
+  .row > h3{
+    font-family:var(--display); font-style:italic; font-size:1.125rem;
+    color:var(--ink); font-weight:600;
+  }
+  .row ul{ margin:0; padding:0; list-style:none; display:grid; gap:9px; }
+  .row li{ display:grid; grid-template-columns:auto 1fr; gap:12px; align-items:baseline; }
+  .row li::before{
+    content:""; width:14px; height:1.5px; background:var(--rule);
+    transform:translateY(-4px);
+  }
+  .row li b{ font-weight:600; }
+
+  /* ---- closing facts ---- */
+  .facts{ display:grid; gap:2px; margin-top:clamp(32px,5vw,48px); }
+  @media (min-width:700px){ .facts{ grid-template-columns:repeat(2,1fr); gap:2px 48px; } }
+  .fact{ padding:16px 0; border-top:1px solid var(--rule-soft); }
+  .fact b{ display:block; font-family:var(--display); font-size:1.0625rem; }
+  .fact span{ color:var(--graphite); font-size:.9375rem; }
+
+  footer{
+    margin-top:clamp(64px,10vw,110px); padding:40px 0 72px;
+    border-top:1px solid var(--rule);
+  }
+  .footrow{ display:flex; flex-wrap:wrap; gap:20px 32px; justify-content:space-between; align-items:end; }
+
+  @media (prefers-reduced-motion:reduce){
+    .rise, .mark{ animation:none; }
+    .mark{ background-size:100% var(--mark-h); }
+    .btn{ transition:none; }
+  }
+</style>
+
+<header>
+  <div class="wrap">
+    <div class="col">
+      <p class="eyebrow rise">for bass players who work it out by ear</p>
+      <h1 class="rise">Three rows.<br>That's the <span class="mark">whole idea</span>.</h1>
+      <p class="lede rise" style="margin-top:26px">
+        How long the note is. Where it sits on the neck. What it's called.
+        Stacked so you read all three in one glance — the way you'd write it
+        on paper, only typed.
+      </p>
+      <div class="actions rise">
+        <a class="btn" href="bass-notation.html">Open the editor</a>
+        <a class="btn ghost" href="bass-notation.html" download>Download · __SIZE__</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="plates">
+    <figure class="plate">
+      <img src="__PHOTO__" alt="A pencil transcription on paper: a row of note lengths, a four-line staff with fret numbers, and the note names Fis, Cis and Dis written underneath.">
+      <figcaption><b>On paper</b><span>Years of transcriptions look like this.</span></figcaption>
+    </figure>
+    <div class="arrow" aria-hidden="true">→</div>
+    <figure class="plate">
+      <img src="__SHOT__" alt="The same two bars rendered by the editor: note lengths, fret numbers on a four-line staff, and the names Fis, Cis and Dis underneath.">
+      <figcaption><b>Typed</b><span>The same two bars, note for note.</span></figcaption>
+    </figure>
+  </div>
+</div>
+
+<section>
+  <div class="wrap">
+    <div class="col">
+      <h2>The third row is the point</h2>
+      <p class="lede" style="margin-top:20px">
+        Tab tells you where to put your fingers. Notation tells you what the note is.
+        This writes both, and puts the names underneath — so the shape under your hand
+        and the harmony you're playing over sit on the same page.
+      </p>
+      <p style="margin-top:20px; color:var(--graphite)">
+        You never type a note name. Put <b style="color:var(--ink)">4</b> on the D string
+        and <b style="color:var(--ink)">Fis</b> appears. Change the string and it changes with it.
+        Dutch naming, or English if you prefer <span class="note">(F♯, C♯, B♭)</span>.
+      </p>
+    </div>
+
+    <figure class="plate solo demo" id="player">
+      <figcaption class="demo-bar">
+        <button type="button" id="play" class="btn sm">
+          <span class="tri" aria-hidden="true"></span><span id="playlabel">Play</span>
+        </button>
+        <span>Two bars, at 96 to the minute, played twice round.</span>
+      </figcaption>
+      <div class="sheet">__PLAYER_SVG__</div>
+    </figure>
+    <p class="col note" style="margin-top:22px">
+      In there: quarters, eighths, a dotted quarter and a tie; an eighth rest;
+      two ghost notes; a triplet; a slide into the second bar and a hammer-on out
+      of it; chord names; and a repeat written once instead of the bars copied out.
+    </p>
+  </section>
+
+<section>
+  <div class="wrap">
+    <div class="col">
+      <h2>Chords first, notes later</h2>
+      <p class="lede" style="margin-top:20px">
+        Some songs come apart structure first — you catch the progression on one
+        pass, then go back and work out what the bass is doing underneath it. The
+        whole shape goes in as one line of typing.
+      </p>
+    </div>
+
+    <ol class="steps">
+      <li class="step">
+        <h3>Type the progression</h3>
+        <pre class="sketchbox">[Verse] Am | C | G G7 | Dm</pre>
+      </li>
+      <li class="step">
+        <h3>Get the bars</h3>
+        <div class="sheet demo">__CHART__</div>
+      </li>
+      <li class="step">
+        <h3>Work out the notes</h3>
+        <div class="sheet demo">__FILLED__</div>
+      </li>
+    </ol>
+
+    <p class="col note" style="margin-top:24px">
+      A bar to a line, or per <b>|</b>. Several chords in one bar split it
+      between them. <b>[Name]</b> starts a section. Typing a fret over a rest
+      turns it into a note and leaves the chord exactly where you put it.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 class="col">What it does</h2>
+    <div class="rows">
+      <div class="row">
+        <h3>Write it</h3>
+        <ul>
+          <li><span>Set a length, type fret numbers, <kbd>space</kbd> to move on. Both hands stay on the keyboard.</span></li>
+          <li><span>Bar lines place themselves from the time signature — you never draw one.</span></li>
+          <li><span>Rests, dots, ties and triplets. Dead notes, hammer-ons, pull-offs, slides.</span></li>
+          <li><span>Repeat marks with a play count, and 1st / 2nd time bars.</span></li>
+          <li><span>Chord names above, lyrics below, section headings like <b>Chorus</b> and <b>Bridge</b>.</span></li>
+          <li><span>Copy a phrase and paste it further on. Undo everything.</span></li>
+        </ul>
+      </div>
+      <div class="row">
+        <h3>Read it</h3>
+        <ul>
+          <li><span>Octaves in Helmholtz, scientific, Yamaha or written pitch — or left off entirely.</span></li>
+          <li><span>Choose how many bars go on a line, and break lines and pages where you want them.</span></li>
+          <li><span>Bar numbers, so "from bar 17" means something at rehearsal.</span></li>
+          <li><span>A section that just repeats an earlier one can say so in a word.</span></li>
+          <li><span>Prints clean to PDF: the music and nothing else, ready for a stand.</span></li>
+        </ul>
+      </div>
+      <div class="row">
+        <h3>Play it</h3>
+        <ul>
+          <li><span>Hear it back from any note, or select a passage and hear only that.</span></li>
+          <li><span>Follows your repeats and endings, so what you hear is what's written.</span></li>
+          <li><span>Loop four bars at 60% and work them up to speed.</span></li>
+          <li><span>The page turns a line early, so there's always something to read ahead into.</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="col">
+      <h2>How it's put together</h2>
+    </div>
+    <div class="facts">
+      <div class="fact"><b>One file</b><span>Download it once. It's yours, and it keeps working.</span></div>
+      <div class="fact"><b>Works offline</b><span>No account, no sign-in, no connection needed.</span></div>
+      <div class="fact"><b>Nothing leaves your laptop</b><span>No tracking, no uploads, no cookies to agree to.</span></div>
+      <div class="fact"><b>Plain files</b><span>Transcriptions save as readable <span style="font-family:var(--mono);font-size:.875em">.json</span> you can keep anywhere.</span></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="footrow">
+      <div class="col" style="max-width:48ch">
+        <p class="note">
+          Built for my own transcriptions, then tidied up in case it's useful to
+          anyone else. It's free. If it saves you an evening, that's payment enough.
+        </p>
+      </div>
+      <div class="actions" style="margin:0">
+        <a class="btn" href="bass-notation.html">Open the editor</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var PLAN = __PLAYER_PLAN__;
+
+  var ctx = null, master = null, raf = 0, timer = 0, t0 = 0, shown = -1;
+  var btn = document.getElementById("play");
+  var label = document.getElementById("playlabel");
+  var root = document.getElementById("player");
+  if (!btn || !root) return;
+
+  function noise(c){
+    var n = Math.floor(c.sampleRate * 0.2);
+    var b = c.createBuffer(1, n, c.sampleRate), d = b.getChannelData(0);
+    for (var i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    return b;
+  }
+
+  // A ghost note: a short filtered thud with no pitch.
+  function dead(c, when, out){
+    var src = c.createBufferSource(); src.buffer = noise(c);
+    var bp = c.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.setValueAtTime(200, when);
+    bp.Q.setValueAtTime(0.7, when);
+    var g = c.createGain();
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(1.6, when + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 0.11);
+    src.connect(bp); bp.connect(g); g.connect(out);
+    src.start(when); src.stop(when + 0.14);
+  }
+
+  // Sawtooth through a closing lowpass: a low E's fundamental is ~41Hz and a
+  // laptop speaker cannot reproduce it, so the harmonics carry the pitch.
+  function pluck(c, when, dur, midi, out, soft, from){
+    var f = 440 * Math.pow(2, (midi - 69) / 12);
+    var osc = c.createOscillator(); osc.type = "sawtooth";
+    var f0 = from ? 440 * Math.pow(2, (from - 69) / 12) : null;
+    osc.frequency.setValueAtTime(f0 || f, when);
+    if (f0) osc.frequency.linearRampToValueAtTime(f, when + Math.min(0.11, dur * 0.5));
+    var lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.Q.setValueAtTime(2.5, when);
+    lp.frequency.setValueAtTime(Math.min(5000, f * 16), when);
+    lp.frequency.exponentialRampToValueAtTime(Math.max(200, f * 2.5), when + Math.min(dur, 0.45));
+    var len = Math.max(0.09, dur * 0.92), peak = soft ? 0.16 : 0.28;
+    var g = c.createGain();
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(peak, when + (soft ? 0.018 : 0.006));
+    g.gain.exponentialRampToValueAtTime(0.0001, when + len);
+    osc.connect(lp); lp.connect(g); g.connect(out);
+    osc.start(when); osc.stop(when + len + 0.05);
+  }
+
+  function mark(i){
+    var was = root.querySelector(".hit.playing");
+    if (was) was.classList.remove("playing");
+    if (i == null) return;
+    var el = root.querySelector('.hit[data-i="' + i + '"]');
+    if (el) el.classList.add("playing");
+  }
+
+  function tick(){
+    if (!ctx) return;
+    var el = ctx.currentTime - t0, j = -1;
+    for (var k = 0; k < PLAN.steps.length; k++){
+      if (PLAN.steps[k].t <= el + 1e-6) j = k; else break;
+    }
+    if (j !== shown){ shown = j; mark(j < 0 ? null : PLAN.steps[j].i); }
+    raf = requestAnimationFrame(tick);
+  }
+
+  function stop(){
+    if (raf) cancelAnimationFrame(raf), raf = 0;
+    if (timer) clearTimeout(timer), timer = 0;
+    if (master){
+      try {
+        var t = ctx.currentTime;
+        master.gain.cancelScheduledValues(t);
+        master.gain.setValueAtTime(master.gain.value, t);
+        master.gain.linearRampToValueAtTime(0, t + 0.03);
+        var m = master;
+        setTimeout(function(){ try { m.disconnect(); } catch(e){} }, 120);
+      } catch(e){}
+    }
+    master = null; shown = -1;
+    mark(null);
+    label.textContent = "Play";
+    btn.classList.remove("playing");
+    btn.setAttribute("aria-pressed", "false");
+  }
+
+  function start(){
+    stop();
+    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === "suspended") ctx.resume();
+    master = ctx.createGain();
+    master.gain.setValueAtTime(1, ctx.currentTime);
+    master.connect(ctx.destination);
+    t0 = ctx.currentTime + 0.12;
+    PLAN.events.forEach(function(e){
+      if (e.x) dead(ctx, t0 + e.t, master);
+      else pluck(ctx, t0 + e.t, e.d, e.m, master, !!e.s, e.f || 0);
+    });
+    label.textContent = "Stop";
+    btn.classList.add("playing");
+    btn.setAttribute("aria-pressed", "true");
+    raf = requestAnimationFrame(tick);
+    timer = setTimeout(stop, (PLAN.total + 0.45) * 1000);
+  }
+
+  btn.addEventListener("click", function(){ master ? stop() : start(); });
+  window.addEventListener("pagehide", stop);
+})();
+</script>
+
