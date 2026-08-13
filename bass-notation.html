@@ -339,6 +339,7 @@
           <div><kbd>v</kbd></div><div>1st / 2nd time bar</div>
           <div><kbd>c</kbd></div><div>type a chord name here</div>
           <div><kbd>l</kbd></div><div>type lyric here</div>
+          <div><kbd>a</kbd></div><div>insert a note after this one</div>
           <div><kbd>⌫</kbd></div><div>delete note</div>
           <div><kbd>⌘Z</kbd></div><div>undo</div>
           <div><kbd>⇧⌘Z</kbd></div><div>redo</div>
@@ -1304,7 +1305,10 @@ function renderSidebar(){
         >${!pageBrk ? "—" : pageBrk.on ? "breaks after this bar" : "no"}</button>
       </div>
       <div class="row"><label></label>
-        <button class="btn" data-del style="flex:1">Delete note</button>
+        <div class="grid" style="flex:1">
+          <button class="btn" data-ins title="Add a slot after this note (a)">Insert after</button>
+          <button class="btn" data-del>Delete note</button>
+        </div>
       </div>`;
   }
 }
@@ -2153,6 +2157,23 @@ function toggleDot(){
   render();
 }
 
+// Add a slot straight after the cursor and sit on it, so the next fret you type
+// fills it. It arrives as a rest: an obvious gap rather than a duplicated note
+// that might be mistaken for finished work.
+function insertNote(){
+  if (isRefSection()) return;
+  pushUndo();
+  const ns = curNotes();
+  const at = ns.length ? Math.min(cursor.i, ns.length - 1) + 1 : 0;
+  ns.splice(at, 0, newNote({
+    dur: entry.dur, dots: entry.dots, rest: true, string: entry.string
+  }));
+  cursor.i = at;
+  selAnchor = null;
+  pendingFret = null;
+  render();
+}
+
 function toggleDead(){
   pushUndo();
   const n = ensureSlot();
@@ -2485,7 +2506,7 @@ const NOTE_KEYS = new Set([
   "0","1","2","3","4","5","6","7","8","9",
   "w","h","q","e","s",".",
   "r","R","t","T","n","N","l","L","c","C",
-  "m","M","i","I","[","]","x","X","-","_","T","v","V","Enter","Backspace","Delete"
+  "m","M","i","I","a","A","[","]","x","X","-","_","T","v","V","Enter","Backspace","Delete"
 ]);
 
 function inField(el){
@@ -2569,6 +2590,7 @@ document.addEventListener("keydown", e => {
     case "Delete":     e.preventDefault(); deleteNote(); break;
     case ".":          e.preventDefault(); toggleDot(); break;
     case "r": case "R": e.preventDefault(); toggleRest(); break;
+    case "a": case "A": e.preventDefault(); insertNote(); break;
     case "x": case "X": e.preventDefault(); toggleDead(); break;
     case "T":           e.preventDefault(); makeTriplet(); break;
     case "v": case "V": e.preventDefault(); cycleEnding(); break;
@@ -2759,6 +2781,7 @@ document.querySelector(".sidebar").addEventListener("click", e => {
   if (d.pagebrk !== undefined) return togglePageBreak();
   if (d.repstart !== undefined) return toggleRepeat("repStart");
   if (d.repend !== undefined) return toggleRepeat("repEnd");
+  if (d.ins !== undefined) return insertNote();
   if (d.del !== undefined) return deleteNote();
   if (d.secref !== undefined){
     pushUndo();
