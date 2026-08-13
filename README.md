@@ -5,7 +5,7 @@ sits on the neck, and what it is called.
 
 **→ https://ubrowz.github.io/threeline/**
 
-Two files, no build step, no dependencies:
+The two files that get served:
 
 - `index.html` — the landing page
 - `bass-notation.html` — the editor itself, 97 KB
