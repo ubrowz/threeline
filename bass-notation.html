@@ -140,7 +140,8 @@
   .fdot:hover circle{r:9}
 
   .seclist{display:flex;flex-direction:column;gap:5px}
-  .secitem{display:flex;gap:4px;align-items:center}
+  .secitem{display:flex;gap:4px;align-items:center;cursor:pointer;border-radius:6px}
+  .secitem:hover{background:var(--panel-2)}
   .secitem .fld{padding:3px 6px;font-size:12.5px}
   .secitem.active .fld{border-color:var(--accent);background:var(--accent-soft)}
   .mini{
@@ -1187,7 +1188,7 @@ function renderSidebar(){
   // --- sections list ---
   const sl = $("#seclist");
   sl.innerHTML = song.sections.map((s, i) => `
-    <div class="secitem ${i===cursor.sec?"active":""}">
+    <div class="secitem ${i===cursor.sec?"active":""}" data-secpick="${i}">
       <input class="fld" data-sechead2="${i}" value="${esc(s.heading)}" placeholder="section ${i+1}">
       <button class="mini ${s.ref?"on":""}" data-secref="${i}" title="Name only — no notation">R</button>
       <button class="mini" data-secup="${i}" title="Move up">↑</button>
@@ -1201,7 +1202,7 @@ function renderSidebar(){
 
   if (isRefSection()){
     const kept = curSection().notes.length;
-    const brk = !!curSection().pageBrk;
+    const brk = !!curSection().pageBrk;   // a reference section breaks before itself
     ins.innerHTML = `<div class="empty">This section shows its name only.</div>`
       + (kept ? `<div class="muted" style="margin-top:7px">${kept} note${kept>1?"s":""} kept, hidden. Turn <b>R</b> off in the list to show them again.</div>`
               : `<div class="muted" style="margin-top:7px">Type its name in the list, e.g. “Chorus”.</div>`)
@@ -1229,6 +1230,8 @@ function renderSidebar(){
       </div>`;
   } else {
     const bar = anchorNote() || n;
+    const lineBrk = breakState("brk");
+    const pageBrk = breakState("pageBrk");
     ins.innerHTML = `
       <div class="row"><label>Length</label><div class="grid" style="flex:1">${durBtns}</div></div>
       <div class="row"><label>Dot</label>
@@ -1291,12 +1294,14 @@ function renderSidebar(){
         >${bar.ending ? bar.ending + (bar.ending===1?"st":bar.ending===2?"nd":"rd") + " time" : "no"}</button>
       </div>
       <div class="row"><label>New line</label>
-        <button class="btn ${bar.brk?"on":""}" data-brk style="flex:1"
-        >${bar.brk?"line starts here":"no"}</button>
+        <button class="btn ${lineBrk && lineBrk.on ? "on" : ""}" data-brk style="flex:1"
+          ${lineBrk ? "" : "disabled"} title="Break the line after this bar (⇧↵)"
+        >${!lineBrk ? "—" : lineBrk.on ? "breaks after this bar" : "no"}</button>
       </div>
       <div class="row"><label>New page</label>
-        <button class="btn ${bar.pageBrk?"on":""}" data-pagebrk style="flex:1" title="Start a new printed page at this bar (p)"
-        >${bar.pageBrk?"page starts here":"no"}</button>
+        <button class="btn ${pageBrk && pageBrk.on ? "on" : ""}" data-pagebrk style="flex:1"
+          ${pageBrk ? "" : "disabled"} title="Start a new printed page after this bar (p)"
+        >${!pageBrk ? "—" : pageBrk.on ? "breaks after this bar" : "no"}</button>
       </div>
       <div class="row"><label></label>
         <button class="btn" data-del style="flex:1">Delete note</button>
@@ -2388,10 +2393,10 @@ function deleteMeasure(){
 }
 
 function toggleBreak(){
-  const a = anchorNote();
-  if (!a) return;
+  const st = breakState("brk");
+  if (!st) return;
   pushUndo();
-  a.brk = !a.brk;
+  st.set(!st.on);
   render();
 }
 
@@ -2404,22 +2409,45 @@ function cycleEnding(){
   render();
 }
 
-function togglePageBreak(){
-  pushUndo();
-  const a = anchorNote();
-  if (a) a.pageBrk = !a.pageBrk;         // break before this bar
-  else {
-    const sec = curSection();             // reference or empty section: no bars
-    if (!sec) return;
-    sec.pageBrk = !sec.pageBrk;
-  }
-  render();
+// A break is entered where the music stops, so it belongs at the end of the bar
+// you are in — which is stored as "this bar starts a new line/page" on the bar
+// that follows. Matches how notation software has always done it.
+function breakAnchor(){
+  const sec = curSection();
+  const ns = sec ? sec.notes : [];
+  if (!ns.length) return null;
+  const bars = splitMeasures(ns);
+  const at = Math.min(cursor.i, ns.length - 1);
+  const bi = bars.findIndex(m => m.idx.indexOf(at) >= 0);
+  const next = bars[bi + 1];
+  return next && next.idx.length ? ns[next.idx[0]] : null;
 }
 
-// Is a page break set for wherever the cursor is?
-function pageBreakHere(){
-  const a = anchorNote();
-  return a ? !!a.pageBrk : !!(curSection() && curSection().pageBrk);
+// Where the flag for "break after this bar" actually lives, and its state.
+// Past the last bar of a section there is no next bar, so a page break there
+// means the next section starts a page instead.
+function breakState(flag){
+  const note = breakAnchor();
+  if (note) return { on: !!note[flag], set: v => { note[flag] = v; } };
+
+  const sec = curSection();
+  if (flag === "pageBrk"){
+    // no bars at all — the break belongs to the section itself
+    if (sec && !sec.notes.length)
+      return { on: !!sec.pageBrk, set: v => { sec.pageBrk = v; } };
+    // past the last bar — the next section starts the page
+    const after = song.sections[cursor.sec + 1];
+    if (after) return { on: !!after.pageBrk, set: v => { after.pageBrk = v; } };
+  }
+  return null;
+}
+
+function togglePageBreak(){
+  const st = breakState("pageBrk");
+  if (!st) return;
+  pushUndo();
+  st.set(!st.on);
+  render();
 }
 
 function toggleRepeat(which){
@@ -2679,6 +2707,26 @@ document.querySelector(".sidebar").addEventListener("input", e => {
 });
 
 document.querySelector(".sidebar").addEventListener("click", e => {
+  // Clicking a section in the list selects it. Without this the only way to
+  // change section from here was the R button, twice.
+  const row = e.target.closest("[data-secpick]");
+  if (row && !e.target.closest("button")){
+    const i = +row.dataset.secpick;
+    if (i !== cursor.sec){
+      cursor.sec = i;
+      cursor.i = 0;
+      selAnchor = null;
+      pendingFret = null;
+      const renaming = e.target.matches("[data-sechead2]");
+      render();
+      if (renaming){
+        const el = document.querySelector(`[data-sechead2="${i}"]`);
+        if (el) el.focus();
+      }
+    }
+    return;
+  }
+
   const dot = e.target.closest("[data-place]");
   if (dot){
     const [st, fr] = dot.dataset.place.split(":").map(Number);
