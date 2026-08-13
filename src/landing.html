@@ -154,6 +154,18 @@
     display:inline-grid; place-items:center; flex:0 0 auto;
     transform:translateY(3px);
   }
+  .aside{
+    margin-top:clamp(26px,4vw,40px);
+    display:grid; gap:clamp(18px,3vw,28px); align-items:center;
+  }
+  @media (min-width:800px){ .aside{ grid-template-columns:minmax(0,300px) 1fr; } }
+  .asideh{
+    font-family:var(--display); font-size:1.25rem; font-weight:600;
+    margin:0 0 10px; letter-spacing:-.01em;
+  }
+  .plate.shot{ padding:10px; }
+  .plate.shot img{ border-radius:5px; }
+
   .sketchbox{
     font-family:var(--mono); font-size:.9375rem; line-height:1.6; margin:0;
     background:var(--card); color:var(--ink);
@@ -329,6 +341,26 @@
       </li>
     </ol>
 
+    <div class="aside">
+      <figure class="plate shot">
+        <img src="__PANEL__" alt="The editor's chord tones panel: the chord Am, its notes A, C and E labelled with their degrees, and a twelve-fret neck with every place they fall.">
+      </figure>
+      <div>
+        <h3 class="asideh">You don't have to work out the notes alone</h3>
+        <p style="color:var(--graphite)">
+          While you fill a bar in, the editor shows the chord you're under —
+          its notes, which degree each one is, and every place they fall on the
+          neck. Click a dot and that note lands under the cursor. No counting
+          frets to find the third.
+        </p>
+        <p class="note" style="margin-top:12px">
+          It reads majors, minors, sevenths, sixths, sus and diminished chords,
+          with roots spelled either way. A slash chord keeps its bass note,
+          which on a bass is the part that matters.
+        </p>
+      </div>
+    </div>
+
     <p class="col note" style="margin-top:24px">
       A bar to a line, or per <b>|</b>. Several chords in one bar split it
       between them. <b>[Name]</b> starts a section. Typing a fret over a rest
@@ -349,6 +381,7 @@
           <li><span>Rests, dots, ties and triplets. Dead notes, hammer-ons, pull-offs, slides.</span></li>
           <li><span>Repeat marks with a play count, and 1st / 2nd time bars.</span></li>
           <li><span>Chord names above, lyrics below, section headings like <b>Chorus</b> and <b>Bridge</b>.</span></li>
+          <li><span>Click a chord to see its notes on a fretboard, then click one to place it.</span></li>
           <li><span>Copy a phrase and paste it further on. Undo everything.</span></li>
         </ul>
       </div>

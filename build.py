@@ -45,6 +45,7 @@ def build() -> tuple[str, int]:
     parts = {
         "__PHOTO__": data_uri(SRC / "assets" / "paper.jpg"),
         "__SHOT__": data_uri(SRC / "assets" / "screen.jpg"),
+        "__PANEL__": data_uri(SRC / "assets" / "chords.jpg"),
         "__PLAYER_SVG__": (SRC / "demo" / "player.svg").read_text(),
         "__PLAYER_PLAN__": json.dumps(
             json.loads((SRC / "demo" / "player.json").read_text()),

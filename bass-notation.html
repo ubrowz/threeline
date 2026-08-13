@@ -125,6 +125,19 @@
   .glyphbtn{font-size:17px;line-height:1}
   .muted{color:var(--ink-2);font-size:12px}
   .empty{color:var(--ink-2);font-size:12.5px;font-style:italic}
+  .chordhead{display:flex;align-items:baseline;gap:8px;margin-bottom:8px}
+  .chordhead b{font-size:16px;font-weight:700;letter-spacing:-.01em}
+  .tones{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px}
+  .tone{
+    display:inline-flex;align-items:baseline;gap:4px;
+    border:1px solid var(--line);border-radius:999px;padding:2px 9px;
+    font-size:12.5px;font-weight:600;background:#fff;
+  }
+  .tone.root{border-color:var(--accent);background:var(--accent-soft);color:#1d4f9c}
+  .tone i{font-style:normal;font-size:10.5px;font-weight:600;color:var(--ink-2)}
+  .tone.root i{color:#2f6fd0}
+  .fdot circle{transition:r .08s ease}
+  .fdot:hover circle{r:9}
 
   .seclist{display:flex;flex-direction:column;gap:5px}
   .secitem{display:flex;gap:4px;align-items:center}
@@ -265,6 +278,11 @@
       <div class="card">
         <h3>Note</h3>
         <div id="inspector"></div>
+      </div>
+
+      <div class="card">
+        <h3>Chord tones</h3>
+        <div id="chordPanel"></div>
       </div>
 
       <div class="card">
@@ -1153,6 +1171,7 @@ function octHint(){
 }
 
 function renderSidebar(){
+  renderChordPanel();
   $("#octHint").innerHTML = octHint();
 
   // --- sections list ---
@@ -1679,9 +1698,195 @@ function updateTransport(){
 
 
 
+
+/* ============================================================
+   Chord tones — what can I play over this?
+   ============================================================ */
+
+// Roots are matched longest-first so Fis beats F and Bes beats B. Both the
+// Dutch and the English spellings are accepted, since either may be typed.
+const CHORD_ROOTS = [
+  ["Cis",1],["Dis",3],["Fis",6],["Gis",8],["Ais",10],
+  ["Des",1],["Ges",6],["Bes",10],["Es",3],["As",8],
+  ["C#",1],["D#",3],["F#",6],["G#",8],["A#",10],
+  ["Db",1],["Eb",3],["Gb",6],["Ab",8],["Bb",10],
+  ["C",0],["D",2],["E",4],["F",5],["G",7],["A",9],["B",11],["H",11]
+].sort((a, b) => b[0].length - a[0].length);
+
+// Suffix → the intervals above the root, in semitones.
+const CHORD_KINDS = [
+  ["maj9",[0,4,7,11,2]], ["maj7",[0,4,7,11]],  ["m7b5",[0,3,6,10]],
+  ["min7",[0,3,7,10]],   ["dim7",[0,3,6,9]],   ["7sus4",[0,5,7,10]],
+  ["add9",[0,4,7,2]],    ["sus2",[0,2,7]],     ["sus4",[0,5,7]],
+  ["min",[0,3,7]],       ["dim",[0,3,6]],      ["aug",[0,4,8]],
+  ["maj",[0,4,7]],       ["m11",[0,3,7,10,5]], ["m9",[0,3,7,10,2]],
+  ["m7",[0,3,7,10]],     ["m6",[0,3,7,9]],     ["M7",[0,4,7,11]],
+  ["11",[0,4,7,10,5]],   ["13",[0,4,7,10,9]],  ["sus",[0,5,7]],
+  ["m",[0,3,7]],         ["9",[0,4,7,10,2]],   ["7",[0,4,7,10]],
+  ["6",[0,4,7,9]],       ["5",[0,7]],          ["o",[0,3,6]],
+  ["+",[0,4,8]],         ["-",[0,3,7]],        ["",[0,4,7]]
+];
+
+// A chord spells its tones the way its root is spelled: the third of F#7 is
+// A#, not Bb. Roots that are plain letters take the usual default.
+const SHARP_ROOTS = new Set(["Cis","Dis","Fis","Gis","Ais","C#","D#","F#","G#","A#"]);
+const FLAT_ROOTS  = new Set(["Des","Es","Ges","As","Bes","Db","Eb","Gb","Ab","Bb"]);
+
+const DEGREE = {
+  0:"1", 1:"♭9", 2:"9", 3:"♭3", 4:"3", 5:"11", 6:"♭5",
+  7:"5", 8:"♯5", 9:"6", 10:"♭7", 11:"7"
+};
+
+// Longest root first, but the suffix has to make sense too: "As" is A flat,
+// yet "Asus4" is A suspended — so a root that leaves nonsense behind is dropped
+// and a shorter one tried.
+function matchRoot(text){
+  for (const [name, pc] of CHORD_ROOTS)
+    if (text.startsWith(name)) return [name, pc, text.slice(name.length)];
+  return null;
+}
+
+function matchKind(text){
+  const t = text.replace(/[()\s]/g, "");
+  for (const [suffix, steps] of CHORD_KINDS)
+    if (t === suffix || (suffix && t.toLowerCase() === suffix.toLowerCase())) return steps;
+  return null;
+}
+
+// "Am7", "F#maj7", "C/G", "Bes" → root, the tones in it, and any slash bass.
+function parseChord(symbol){
+  const raw = String(symbol || "").trim();
+  if (!raw) return null;
+
+  const [head, over] = raw.split("/");
+  const text = head.trim();
+
+  let rootName = null, rootPc = 0, steps = null;
+  for (const [name, pc] of CHORD_ROOTS){
+    if (!text.startsWith(name)) continue;
+    const kind = matchKind(text.slice(name.length));
+    if (kind === null) continue;          // leftover is nonsense — try a shorter root
+    rootName = name; rootPc = pc; steps = kind;
+    break;
+  }
+  if (steps === null) return null;
+
+  let bassPc = null;
+  if (over !== undefined){
+    const b = matchRoot(over.trim());
+    if (b) bassPc = b[1];
+  }
+
+  return {
+    symbol: raw,
+    rootPc,
+    rootName,
+    bassPc,
+    prefer: SHARP_ROOTS.has(rootName) ? "sharp" : FLAT_ROOTS.has(rootName) ? "flat" : null,
+    tones: steps.map(st => ({ pc: (rootPc + st) % 12, degree: DEGREE[st % 12] }))
+  };
+}
+
+// The chord governing the cursor: the nearest one at or before it in this section.
+function chordInEffect(){
+  const ns = curNotes();
+  if (!ns.length) return null;
+  for (let i = Math.min(cursor.i, ns.length - 1); i >= 0; i--)
+    if (ns[i].chord) return parseChord(ns[i].chord) || { symbol: ns[i].chord, unknown: true };
+  return null;
+}
+
+
+// A 12-fret neck with every chord tone marked, root filled. Clicking a dot puts
+// that note under the cursor, which is the whole point: read the chord, pick a
+// note, carry on.
+const FB = { frets:12, nut:24, step:18.4, top:13, gap:20, r:7.2 };
+
+function fretboard(chord){
+  const W = FB.nut + FB.frets * FB.step + 10;
+  const H = FB.top + 3 * FB.gap + 30;
+  const y = s => FB.top + (NSTR - 1 - s) * FB.gap;
+  const x = f => f === 0 ? FB.nut - 13 : FB.nut + (f - 0.5) * FB.step;
+  const pcs = new Map(chord.tones.map(t => [t.pc, t.degree]));
+
+  let g = "";
+  for (let f = 1; f <= FB.frets; f++){
+    const fx = FB.nut + f * FB.step;
+    g += `<line x1="${fx}" y1="${y(3)}" x2="${fx}" y2="${y(0)}" stroke="var(--line)" stroke-width="1"/>`;
+  }
+  g += `<rect x="${FB.nut-2.5}" y="${y(3)}" width="2.5" height="${3*FB.gap}" fill="var(--ink-2)"/>`;
+  for (let st = 0; st < NSTR; st++)
+    g += `<line x1="${FB.nut-2.5}" y1="${y(st)}" x2="${FB.nut + FB.frets*FB.step}" y2="${y(st)}" `
+       + `stroke="var(--line)" stroke-width="1"/>`;
+
+  for (const f of [3,5,7,9,12])
+    g += `<text x="${FB.nut + (f-0.5)*FB.step}" y="${H-16}" text-anchor="middle" font-size="9" `
+       + `fill="var(--ink-2)">${f}</text>`;
+  for (let st = 0; st < NSTR; st++)
+    g += `<text x="4" y="${y(st)+3.5}" font-size="9" font-weight="600" fill="var(--ink-2)">${STRING_LABEL[st]}</text>`;
+
+  for (let st = 0; st < NSTR; st++){
+    for (let f = 0; f <= FB.frets; f++){
+      const pc = ((TUNING[st] + f) % 12 + 12) % 12;
+      if (!pcs.has(pc)) continue;
+      const isRoot = pc === chord.rootPc;
+      const isBass = chord.bassPc !== null && pc === chord.bassPc;
+      const fill = isRoot ? "var(--accent)" : isBass ? "#1d7a52" : "#fff";
+      const ink  = (isRoot || isBass) ? "#fff" : "var(--ink)";
+      g += `<g class="fdot" data-place="${st}:${f}" style="cursor:pointer">`
+         + `<circle cx="${x(f)}" cy="${y(st)}" r="${FB.r}" fill="${fill}" `
+         + `stroke="var(--accent)" stroke-width="1.4"/>`
+         + `<text x="${x(f)}" y="${y(st)+3}" text-anchor="middle" font-size="8" font-weight="700" `
+         + `fill="${ink}" style="pointer-events:none">${pcs.get(pc).replace(/[♭♯]/,"")}</text>`
+         + `<title>${STRING_LABEL[st]} string, fret ${f} — ${pcs.get(pc)}</title></g>`;
+    }
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;overflow:visible">${g}</svg>`;
+}
+
+function renderChordPanel(){
+  const el = $("#chordPanel");
+  if (!el) return;
+  const chord = chordInEffect();
+
+  if (!chord){
+    el.innerHTML = `<div class="empty">No chord here yet. Press <kbd>c</kbd> to name one, `
+                 + `or sketch a whole progression above.</div>`;
+    return;
+  }
+  if (chord.unknown){
+    el.innerHTML = `<div class="row"><label>Chord</label><b>${esc(chord.symbol)}</b></div>`
+                 + `<div class="muted" style="margin-top:6px">Not a chord symbol this knows, so no notes to show. `
+                 + `It still prints exactly as you typed it.</div>`;
+    return;
+  }
+
+  const spell = pc => toneName(pc, chord.prefer);
+  const pills = chord.tones.map(t =>
+    `<span class="tone${t.pc === chord.rootPc ? " root" : ""}">${esc(spell(t.pc))}`
+    + `<i>${t.degree}</i></span>`).join("");
+
+  el.innerHTML =
+      `<div class="chordhead"><b>${esc(chord.symbol)}</b>`
+    + (chord.bassPc !== null ? `<span class="muted">bass on ${esc(spell(chord.bassPc))}</span>` : "")
+    + `</div>`
+    + `<div class="tones">${pills}</div>`
+    + fretboard(chord)
+    + `<div class="muted" style="margin-top:4px">Click a dot to put that note under the cursor.</div>`;
+}
+
+// The name for a pitch class on its own, with no string or fret behind it.
+function toneName(pc, prefer){
+  const t = names();
+  const table = prefer === "sharp" ? t.sharp : prefer === "flat" ? t.flat : t.def;
+  return table[((pc % 12) + 12) % 12];
+}
+
 /* ============================================================
    Chord sketch — lay out the shape of a song before any notes
    ============================================================ */
+
+
 
 // "[Verse] Am | C | G" → sections of bars of chords. A newline separates bars
 // just as | does, so a progression can be typed a bar to a line.
@@ -2464,6 +2669,18 @@ document.querySelector(".sidebar").addEventListener("input", e => {
 });
 
 document.querySelector(".sidebar").addEventListener("click", e => {
+  const dot = e.target.closest("[data-place]");
+  if (dot){
+    const [st, fr] = dot.dataset.place.split(":").map(Number);
+    pushUndo();
+    const n = ensureSlot();
+    n.rest = false; n.dead = false;
+    n.string = st; n.fret = fr; n.spell = null;
+    entry.string = st;
+    pendingFret = null;
+    render();
+    return;
+  }
   const b = e.target.closest("button");
   if (!b) return;
   const d = b.dataset;
