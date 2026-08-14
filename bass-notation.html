@@ -266,6 +266,7 @@
           <select class="fld" id="fNaming">
             <option value="nl">Dutch — Fis, Cis, Bes</option>
             <option value="en">English — F#, C#, Bb</option>
+            <option value="off">no names — leave the row out</option>
           </select>
         </div>
         <div class="row"><label>Bars / line</label>
@@ -432,6 +433,9 @@ const NAMING = {
   }
 };
 function names(){ return NAMING[song.naming] || NAMING.nl; }
+// The bottom row can be left out. Everything else — the note picker, the
+// chord panel, the status line — still needs a name, so only the row goes.
+function showNames(){ return (song && song.naming) !== "off"; }
 
 // Duration values in quarter notes.
 const DUR = { w:4, h:2, q:1, e:0.5, s:0.25 };
@@ -734,7 +738,7 @@ function refreshMetrics(){
   CHORD_Y   = stems ? STAFF_TOP - 8 : 9;
 
   NAME_Y  = STAFF_BOT + 25;
-  LYRIC_Y = NAME_Y + 19;
+  LYRIC_Y = showNames() ? NAME_Y + 19 : NAME_Y;   // lyrics take the empty row
 }
 
 const FONT_FRET  = "600 12.5px system-ui,-apple-system,sans-serif";
@@ -760,7 +764,7 @@ function noteWidth(notes, i){
   const label = (!n.rest && !isTiedInto(notes, i));
   if (label){
     w = Math.max(w, textW(n.dead ? "x" : String(n.fret), FONT_FRET) + 12);
-    if (!n.dead) w = Math.max(w, textW(nameOf(n), FONT_NAME) + 10);
+    if (!n.dead && showNames()) w = Math.max(w, textW(nameOf(n), FONT_NAME) + 10);
   }
   if (n.link) w += 7;              // room for the h / p / slide mark between notes
   if (n.lyric) w = Math.max(w, textW(n.lyric, FONT_LYRIC) + 8);
@@ -995,7 +999,9 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
   const voltaBand = showEnds  ? VOLTA_BAND : 0;
   const top = voltaBand + chordBand + tupBand;
 
-  const bodyH = showLyrics ? LYRIC_Y + 8 : NAME_Y + 8;
+  const bodyH = showLyrics ? LYRIC_Y + 8
+              : showNames() ? NAME_Y + 8
+              : Math.max(STAFF_BOT + 12, TIE_Y + 12);   // a tie still hangs below
   const H = bodyH + top;
   const selY = top ? 2 - top : 6;
   const selH = (bodyH - 6) - selY;
@@ -1287,7 +1293,7 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
         s += `<text x="${cx}" y="${y+4.4}" text-anchor="middle" `
            + `font-size="12.5" font-weight="600" font-family="system-ui,-apple-system,sans-serif" fill="#2a2e35">${t}</text>`;
         // --- note name row (a dead note has no pitch to name) ---
-        if (!n.dead)
+        if (!n.dead && showNames())
           s += `<text x="${cx}" y="${NAME_Y}" text-anchor="middle" font-size="12.5" font-weight="500" `
              + `font-family="system-ui,-apple-system,sans-serif" fill="#1b1d21">${esc(nameOf(n))}</text>`;
       }
@@ -1341,6 +1347,7 @@ function tempoMark(){
 
 function render(){
   refreshMetrics();
+  $("#fOct").disabled = !showNames();   // with no name row, octaves have nothing to show on
   const page = $("#page");
   let html = "";
 
@@ -3068,7 +3075,9 @@ $("#fTime").addEventListener("change", e => {
 });
 $("#fOct").addEventListener("change", e => { pushUndo(); song.octaves = e.target.value; render(); });
 $("#fBars").addEventListener("change", e => { pushUndo(); song.barsPerLine = e.target.value; render(); });
-$("#fNaming").addEventListener("change", e => { pushUndo(); song.naming = e.target.value; render(); });
+$("#fNaming").addEventListener("change", e => {
+  pushUndo(); song.naming = e.target.value; render();
+});
 $("#fRhythm").addEventListener("change", e => {
   pushUndo();
   song.rhythmStyle = e.target.value;
