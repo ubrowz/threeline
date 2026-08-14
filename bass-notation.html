@@ -2991,7 +2991,49 @@ const CAN_PICK = typeof window.showSaveFilePicker === "function"
 
 let fileHandle = null;     // the file being edited, once one has been chosen
 let fileName = "";
-let savedText = "";        // what was last written, to spot unsaved changes
+let savedText = null;      // last written text; null means "not known yet"
+
+// A file handle survives a reload if it is kept in IndexedDB — localStorage
+// cannot hold one. The browser still asks permission before the next write,
+// which is why nothing is requested until you actually save.
+const IDB_NAME = "threeline", IDB_STORE = "handles", IDB_KEY = "current";
+
+function idb(){
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(IDB_NAME, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(IDB_STORE);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+
+async function rememberHandle(handle){
+  try {
+    const db = await idb();
+    await new Promise((res, rej) => {
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      if (handle) tx.objectStore(IDB_STORE).put(handle, IDB_KEY);
+      else tx.objectStore(IDB_STORE).delete(IDB_KEY);
+      tx.oncomplete = res;
+      tx.onerror = () => rej(tx.error);
+    });
+    db.close();
+  } catch(e){ /* private mode, or storage turned off */ }
+}
+
+async function recallHandle(){
+  try {
+    const db = await idb();
+    const h = await new Promise((res, rej) => {
+      const tx = db.transaction(IDB_STORE, "readonly");
+      const q = tx.objectStore(IDB_STORE).get(IDB_KEY);
+      q.onsuccess = () => res(q.result || null);
+      q.onerror = () => rej(q.error);
+    });
+    db.close();
+    return h;
+  } catch(e){ return null; }
+}
 
 const FILE_TYPES = [{
   description: "Threeline transcription",
@@ -3009,13 +3051,21 @@ function songText(){ return JSON.stringify(song, null, 2); }
 function updateFileState(){
   const el = $("#saveState");
   if (!el) return;
-  const changed = songText() !== savedText;
   if (!fileName){
     el.textContent = CAN_PICK ? "not saved to a file" : "autosaved here";
-  } else {
-    el.textContent = fileName + (changed ? " · unsaved changes" : " · saved");
+    el.classList.remove("dirty");
+    return;
   }
-  el.classList.toggle("dirty", !!fileName && changed);
+  // after a reload the handle is back but we cannot know whether the file
+  // still matches, so the name is shown without claiming either way
+  if (savedText === null){
+    el.textContent = fileName;
+    el.classList.remove("dirty");
+    return;
+  }
+  const changed = songText() !== savedText;
+  el.textContent = fileName + (changed ? " · unsaved changes" : " · saved");
+  el.classList.toggle("dirty", changed);
 }
 
 async function writable(handle){
@@ -3037,6 +3087,7 @@ async function writeSong(handle){
   fileHandle = handle;
   fileName = handle.name;
   savedText = text;
+  rememberHandle(handle);
   updateFileState();
   return true;
 }
@@ -3068,6 +3119,13 @@ async function saveFile(askAgain){
     await writeSong(handle);
   } catch (err){
     if (err && err.name === "AbortError") return;     // you closed the dialog
+    if (fileHandle && !askAgain){
+      // the file may have been moved, renamed or deleted since — ask afresh
+      fileHandle = null; fileName = ""; savedText = null;
+      rememberHandle(null);
+      updateFileState();
+      return saveFile(true);
+    }
     alert("Could not save:\n" + (err && err.message ? err.message : err));
   }
 }
@@ -3081,6 +3139,7 @@ async function openFile(){
     fileHandle = handle;                 // so Save writes back to this file
     fileName = handle.name;
     savedText = songText();
+    rememberHandle(handle);
     updateFileState();
   } catch (err){
     if (err && err.name === "AbortError") return;
@@ -3159,7 +3218,8 @@ $("#btnRedo").addEventListener("click", redo);
 $("#btnNew").addEventListener("click", () => {
   if (!confirm("Start a new, empty transcription? Save first if you want to keep this one.")) return;
   pushUndo();
-  fileHandle = null; fileName = ""; savedText = "";
+  fileHandle = null; fileName = ""; savedText = null;
+  rememberHandle(null);
   song = { version:1, title:"Untitled", artist:"", timeSig:{beats:4,unit:4}, naming:"nl", tuning:DEFAULT_TUNING.slice(), tempo:90, showTempo:true, followRepeats:true, barsPerLine:"auto", octaves:DEFAULT_OCTAVES, sections:[newSection("Intro")] };
   cursor = { sec:0, i:0 };
   syncFields();
@@ -3178,6 +3238,18 @@ try{
 }catch(e){ /* keep the starting song */ }
 
 loadPrefs();
+
+// Bring back the file this transcription was saved to, if there was one. No
+// permission is asked here — the browser wants a click for that, so it happens
+// on the first save instead.
+recallHandle().then(h => {
+  if (!h) return;
+  fileHandle = h;
+  fileName = h.name;
+  savedText = null;
+  updateFileState();
+});
+
 syncFields();
 render();
 updateTransport();
