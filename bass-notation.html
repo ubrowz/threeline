@@ -714,25 +714,29 @@ let LYRIC_Y   = NAME_Y + 19;
 function rhythmStyle(){ return song && song.rhythmStyle === "stems" ? "stems" : "heads"; }
 
 let STEM_BASE = 46, STEM_DX = 4.2, REST_Y = 46, TIE_Y = 53.5, TUP_Y = 5;
+let UP_BEAM = 21, DOWN_BEAM = 0;     // where beams sit, above and below the staff
 
 // The staff grows downward with each extra string, so everything under it moves.
 function refreshMetrics(){
   NSTR = tuning().length;
   const stems = rhythmStyle() === "stems";
 
-  STEM_TOP  = stems ? 6  : 21;
+  STEM_TOP  = stems ? 14 : 21;
   HEAD_Y    = stems ? 0  : 46;
-  STAFF_TOP = stems ? 28 : 74;
+  STAFF_TOP = stems ? 30 : 74;
   STAFF_BOT = STAFF_TOP + STR_GAP * (NSTR - 1);
 
-  STEM_BASE = stems ? STAFF_TOP - 2 : HEAD_Y;   // where a stem starts
-  STEM_DX   = stems ? 0 : 4.2;                  // heads carry their stem on the right
-  REST_Y    = stems ? STAFF_TOP - 10 : HEAD_Y;
-  TIE_Y     = stems ? STAFF_BOT + 9 : HEAD_Y + 7.5;
-  TUP_Y     = stems ? -6 : 5;
-  CHORD_Y   = stems ? -6 : 9;
+  UP_BEAM   = stems ? STAFF_TOP - 16 : STEM_TOP;
+  DOWN_BEAM = STAFF_BOT + 16;
 
-  NAME_Y  = STAFF_BOT + (stems ? 34 : 25);   // room for a tie under the staff
+  STEM_BASE = HEAD_Y;
+  STEM_DX   = stems ? 0 : 4.2;                  // heads carry their stem on the right
+  REST_Y    = stems ? (STAFF_TOP + STAFF_BOT) / 2 : HEAD_Y;
+  TIE_Y     = stems ? DOWN_BEAM + 9 : HEAD_Y + 7.5;
+  TUP_Y     = stems ? UP_BEAM - 11 : 5;
+  CHORD_Y   = stems ? UP_BEAM - 11 : 9;
+
+  NAME_Y  = stems ? DOWN_BEAM + 32 : STAFF_BOT + 25;   // a tie hangs under the beam
   LYRIC_Y = NAME_Y + 19;
 }
 
@@ -910,12 +914,14 @@ function svgDeadHead(x, y){
        + `<line x1="${x-r}" y1="${y+r}" x2="${x+r}" y2="${y-r}" stroke="#2a2e35" stroke-width="1.45"/>`;
 }
 
-function svgFlag(x, y){
+function svgFlag(x, y, dir){
+  if (dir === -1)   // stem points down, so the flag curls the other way
+    return `<path d="M${x},${y} c 5,-2.5 8,-6.2 7,-11.6 c 3,6.6 1.3,10.8 -7,14.9 z" fill="#2a2e35"/>`;
   // one flag (eighth) hanging off the stem top, drawn to the right
   return `<path d="M${x},${y} c 5,2.5 8,6.2 7,11.6 c 3,-6.6 1.3,-10.8 -7,-14.9 z" fill="#2a2e35"/>`;
 }
-function svgFlag2(x, y){
-  return svgFlag(x, y) + svgFlag(x, y + 6);
+function svgFlag2(x, y, dir){
+  return svgFlag(x, y, dir) + svgFlag(x, y + 6 * (dir === -1 ? -1 : 1), dir);
 }
 
 const BAR_INK = "#33383f";
@@ -1022,6 +1028,27 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
     for (const it of mm.items)
       pos.set(it.i, mm.x + it.x + it.w / 2);
 
+  // In the stems style a stem grows out of the fret number itself: up from the
+  // two lowest strings, down from the two highest, as printed tab does. Notes
+  // under one beam have to agree, so the group votes.
+  const stemDir = new Map();
+  if (rhythmStyle() === "stems"){
+    const own = n => (n.string < NSTR / 2 ? 1 : -1);
+    for (const mm of sys.measures){
+      for (const g of beamGroups(notes, mm)){
+        if (g.items.length < 2) continue;
+        let vote = 0;
+        for (const it of g.items) vote += own(notes[it.i]);
+        const d = vote >= 0 ? 1 : -1;
+        for (const it of g.items) stemDir.set(it.i, d);
+      }
+      for (const it of mm.items)
+        if (!stemDir.has(it.i) && !notes[it.i].rest) stemDir.set(it.i, own(notes[it.i]));
+    }
+  }
+  const dirOf = i => stemDir.get(i) || 1;
+  const beamY = d => (d === -1 ? DOWN_BEAM : UP_BEAM);
+
   // ---- triplet brackets, just above the beams ----------------------
   if (showTups){
     for (const run of tupletRuns(notes)){
@@ -1100,7 +1127,10 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
       if (g.items.length < 2){ continue; }
       const xs = g.items.map(it => m.x + it.x + it.w/2 + STEM_DX);
       const x1 = xs[0], x2 = xs[xs.length-1];
-      s += `<rect x="${x1}" y="${STEM_TOP}" width="${x2-x1}" height="2.5" fill="#2a2e35"/>`;
+      const gd = dirOf(g.items[0].i);
+      const by = rhythmStyle() === "stems" ? beamY(gd) : STEM_TOP;
+      const step = rhythmStyle() === "stems" ? 5 * gd : 5;
+      s += `<rect x="${x1}" y="${by}" width="${x2-x1}" height="2.5" fill="#2a2e35"/>`;
       // secondary beam over runs of 16ths
       let run = [];
       const flush = () => {
@@ -1131,25 +1161,32 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
         s += svgRest(cx, n.dur, n.dots);
       } else {
         const sx = cx + STEM_DX;
+        const d = stems ? dirOf(it.i) : 1;
+        const far = stems ? beamY(d) : STEM_TOP;
+        // where the stem leaves the fret number, or the notehead
+        const from = stems ? stringY(n.string) - 7.5 * d : STEM_BASE - 0.5;
+
         if (!stems){
           const filled = (n.dur !== "w" && n.dur !== "h");
           s += n.dead ? svgDeadHead(cx, HEAD_Y) : svgHead(cx, HEAD_Y, filled, n.dur === "w");
         }
         if (n.dur !== "w"){
-          s += `<line x1="${sx}" y1="${STEM_BASE-0.5}" x2="${sx}" y2="${STEM_TOP}" stroke="#2a2e35" stroke-width="1.05"/>`;
+          s += `<line x1="${sx}" y1="${from}" x2="${sx}" y2="${far}" stroke="#2a2e35" stroke-width="1.05"/>`;
           if (!beamed.has(it.i)){
-            if (n.dur === "e") s += svgFlag(sx, STEM_TOP);
-            if (n.dur === "s") s += svgFlag2(sx, STEM_TOP);
+            if (n.dur === "e") s += svgFlag(sx, far, stems ? d : 1);
+            if (n.dur === "s") s += svgFlag2(sx, far, stems ? d : 1);
           }
         }
-        // With no heads, a ring at the end of the stem marks the long values:
-        // half keeps its stem, whole has none, as in ordinary notation.
+        // With no heads, a ring at the far end marks the long values: a half
+        // keeps its stem, a whole has none, as in ordinary notation.
         if (stems && (n.dur === "h" || n.dur === "w"))
-          s += `<circle cx="${sx}" cy="${STEM_TOP + 3}" r="3" fill="#fff" stroke="#2a2e35" stroke-width="1.2"/>`;
-        const dx = stems ? sx + 5.5 : cx + 9.5;
-        const dy = stems ? STEM_TOP + 3 : HEAD_Y - 4.5;
-        for (let d = 0; d < n.dots; d++)
-          s += `<circle cx="${dx + d*4}" cy="${dy}" r="1.6" fill="#2a2e35"/>`;
+          s += `<circle cx="${sx}" cy="${n.dur === "w" ? stringY(n.string) - 11 * d : far}" r="3" `
+             + `fill="#fff" stroke="#2a2e35" stroke-width="1.2"/>`;
+        // the dot rides beside the fret number, as it does on paper
+        const dotX = stems ? cx + 9 : cx + 9.5;
+        const dotY = stems ? stringY(n.string) - 5 : HEAD_Y - 4.5;
+        for (let k = 0; k < n.dots; k++)
+          s += `<circle cx="${dotX + k*4}" cy="${dotY}" r="1.6" fill="#2a2e35"/>`;
       }
 
       // Where the connector runs to. If the following note is on the next line,
