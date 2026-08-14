@@ -256,6 +256,12 @@
             <option value="custom" hidden>custom tuning</option>
           </select>
         </div>
+        <div class="row"><label>Rhythm</label>
+          <select class="fld" id="fRhythm">
+            <option value="heads">note heads above</option>
+            <option value="stems">stems on the staff</option>
+          </select>
+        </div>
         <div class="row"><label>Note names</label>
           <select class="fld" id="fNaming">
             <option value="nl">Dutch — Fis, Cis, Bes</option>
@@ -490,6 +496,7 @@ function demoSong(){
     artist: "",
     timeSig: { beats:4, unit:4 },
     naming: "nl",
+    rhythmStyle: "heads",
     tuning: DEFAULT_TUNING.slice(),
     tempo: 90,
     showTempo: true,
@@ -693,19 +700,39 @@ const PAGE_W    = 820;
 const PAD_X     = 40;
 const CONTENT_W = PAGE_W - PAD_X * 2;   // 740
 
-const HEAD_Y      = 46;   // rhythm note-head centre line
-const STEM_TOP    = 21;
-const STAFF_TOP   = 74;
+let HEAD_Y        = 46;   // rhythm note-head centre line
+let STEM_TOP      = 21;
+let STAFF_TOP     = 74;
 const STR_GAP     = 15;
 let STAFF_BOT = STAFF_TOP + STR_GAP * (NSTR - 1);
 let NAME_Y    = STAFF_BOT + 25;
 let LYRIC_Y   = NAME_Y + 19;
 
+// Two ways of writing the rhythm. "heads" puts a row of noteheads above the
+// staff; "stems" hangs the stems off the staff itself and drops the heads,
+// which takes a third off the height of every line.
+function rhythmStyle(){ return song && song.rhythmStyle === "stems" ? "stems" : "heads"; }
+
+let STEM_BASE = 46, STEM_DX = 4.2, REST_Y = 46, TIE_Y = 53.5, TUP_Y = 5;
+
 // The staff grows downward with each extra string, so everything under it moves.
 function refreshMetrics(){
   NSTR = tuning().length;
+  const stems = rhythmStyle() === "stems";
+
+  STEM_TOP  = stems ? 6  : 21;
+  HEAD_Y    = stems ? 0  : 46;
+  STAFF_TOP = stems ? 28 : 74;
   STAFF_BOT = STAFF_TOP + STR_GAP * (NSTR - 1);
-  NAME_Y = STAFF_BOT + 25;
+
+  STEM_BASE = stems ? STAFF_TOP - 2 : HEAD_Y;   // where a stem starts
+  STEM_DX   = stems ? 0 : 4.2;                  // heads carry their stem on the right
+  REST_Y    = stems ? STAFF_TOP - 10 : HEAD_Y;
+  TIE_Y     = stems ? STAFF_BOT + 9 : HEAD_Y + 7.5;
+  TUP_Y     = stems ? -6 : 5;
+  CHORD_Y   = stems ? -6 : 9;
+
+  NAME_Y  = STAFF_BOT + (stems ? 34 : 25);   // room for a tie under the staff
   LYRIC_Y = NAME_Y + 19;
 }
 
@@ -716,7 +743,7 @@ const FONT_CHORD = "700 13px system-ui,-apple-system,sans-serif";
 const CHORD_H    = 26;   // extra height a section needs when it carries chords
 const TUP_BAND   = 14;   // headroom for triplet brackets, just above the beams
 const VOLTA_BAND = 20;   // headroom for 1st / 2nd ending brackets, at the top
-const CHORD_Y    = 9;    // baseline, in body coordinates — sits just above the stems,
+let CHORD_Y      = 9;    // baseline, in body coordinates — sits just above the stems,
                          // so the slack in the chord band falls above the text and the
                          // chord groups with its own rhythm row rather than the system above
 
@@ -917,7 +944,7 @@ function repeatEnd(x){
 }
 
 function svgRest(x, dur, dots){
-  const y = HEAD_Y;
+  const y = REST_Y;
   let g = "";
   if (dur === "w"){
     // hangs below its reference line
@@ -1000,8 +1027,8 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
     for (const run of tupletRuns(notes)){
       const a = pos.get(run.from), b = pos.get(run.to);
       if (a === undefined || b === undefined) continue;   // split across lines
-      const x1 = a - 5, x2 = b + 5, mid = (x1 + x2) / 2;
-      const y = 5, tick = 9.5;
+      const x1 = a - 5 + STEM_DX, x2 = b + 5 + STEM_DX, mid = (x1 + x2) / 2;
+      const y = TUP_Y, tick = TUP_Y + 4.5;
       s += `<path d="M${x1},${tick} L${x1},${y} L${mid-6},${y} M${mid+6},${y} L${x2},${y} L${x2},${tick}" `
          + `stroke="#33383f" stroke-width="1.1" fill="none"/>`
          + `<text x="${mid}" y="${y+3.6}" text-anchor="middle" font-size="9.5" font-weight="700" `
@@ -1071,7 +1098,7 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
     // beams first, so we know which stems skip their flag
     for (const g of beamGroups(notes, m)){
       if (g.items.length < 2){ continue; }
-      const xs = g.items.map(it => m.x + it.x + it.w/2 + 4.2);
+      const xs = g.items.map(it => m.x + it.x + it.w/2 + STEM_DX);
       const x1 = xs[0], x2 = xs[xs.length-1];
       s += `<rect x="${x1}" y="${STEM_TOP}" width="${x2-x1}" height="2.5" fill="#2a2e35"/>`;
       // secondary beam over runs of 16ths
@@ -1098,21 +1125,31 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
       const cx = m.x + it.x + it.w / 2;
       const selected = inSelection(secIdx, it.i);
 
-      // --- rhythm row ---
+      // --- how long the note is ---
+      const stems = rhythmStyle() === "stems";
       if (n.rest){
         s += svgRest(cx, n.dur, n.dots);
       } else {
-        const filled = (n.dur !== "w" && n.dur !== "h");
-        s += n.dead ? svgDeadHead(cx, HEAD_Y) : svgHead(cx, HEAD_Y, filled, n.dur === "w");
+        const sx = cx + STEM_DX;
+        if (!stems){
+          const filled = (n.dur !== "w" && n.dur !== "h");
+          s += n.dead ? svgDeadHead(cx, HEAD_Y) : svgHead(cx, HEAD_Y, filled, n.dur === "w");
+        }
         if (n.dur !== "w"){
-          s += `<line x1="${cx+4.2}" y1="${HEAD_Y-0.5}" x2="${cx+4.2}" y2="${STEM_TOP}" stroke="#2a2e35" stroke-width="1.05"/>`;
+          s += `<line x1="${sx}" y1="${STEM_BASE-0.5}" x2="${sx}" y2="${STEM_TOP}" stroke="#2a2e35" stroke-width="1.05"/>`;
           if (!beamed.has(it.i)){
-            if (n.dur === "e") s += svgFlag(cx+4.2, STEM_TOP);
-            if (n.dur === "s") s += svgFlag2(cx+4.2, STEM_TOP);
+            if (n.dur === "e") s += svgFlag(sx, STEM_TOP);
+            if (n.dur === "s") s += svgFlag2(sx, STEM_TOP);
           }
         }
+        // With no heads, a ring at the end of the stem marks the long values:
+        // half keeps its stem, whole has none, as in ordinary notation.
+        if (stems && (n.dur === "h" || n.dur === "w"))
+          s += `<circle cx="${sx}" cy="${STEM_TOP + 3}" r="3" fill="#fff" stroke="#2a2e35" stroke-width="1.2"/>`;
+        const dx = stems ? sx + 5.5 : cx + 9.5;
+        const dy = stems ? STEM_TOP + 3 : HEAD_Y - 4.5;
         for (let d = 0; d < n.dots; d++)
-          s += `<circle cx="${cx + 9.5 + d*4}" cy="${HEAD_Y-4.5}" r="1.6" fill="#2a2e35"/>`;
+          s += `<circle cx="${dx + d*4}" cy="${dy}" r="1.6" fill="#2a2e35"/>`;
       }
 
       // Where the connector runs to. If the following note is on the next line,
@@ -1126,7 +1163,7 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
       // The other half of a connector that started on the line above.
       const prev = notes[it.i - 1];
       if (prev && !pos.has(it.i - 1) && (prev.tie || prev.link)){
-        const y0 = HEAD_Y + 7.5, from = Math.max(2, cx - 26);
+        const y0 = TIE_Y, from = Math.max(2, cx - 26);
         s += `<path d="M${from},${y0} Q${(from+cx)/2},${y0+8} ${cx},${y0}" `
            + `stroke="#2a2e35" stroke-width="${prev.tie ? 1.15 : 0.95}" fill="none"`
            + (prev.tie ? "" : ` opacity="0.7"`) + `/>`;
@@ -1136,7 +1173,7 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
       if (n.tie){
         const x2 = nextX();
         if (x2 !== null){
-          const y0 = HEAD_Y + 7.5, mid = (cx + x2) / 2;
+          const y0 = TIE_Y, mid = (cx + x2) / 2;
           s += `<path d="M${cx},${y0} Q${mid},${y0+9} ${x2},${y0}" stroke="#2a2e35" stroke-width="1.15" fill="none"/>`;
         }
       }
@@ -1159,7 +1196,7 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
                + `font-style="italic" font-family="system-ui,-apple-system,sans-serif" fill="#2a2e35">${letter}</text>`;
           }
           // a slur over the pair, as in printed tab
-          const y0 = HEAD_Y + 7.5, mx = (cx + x2) / 2;
+          const y0 = TIE_Y, mx = (cx + x2) / 2;
           if (!n.tie)
             s += `<path d="M${cx},${y0} Q${mx},${y0+8} ${x2},${y0}" stroke="#2a2e35" stroke-width="0.95" `
                + `fill="none" opacity="0.7"/>`;
@@ -2957,6 +2994,12 @@ $("#fTime").addEventListener("change", e => {
 $("#fOct").addEventListener("change", e => { pushUndo(); song.octaves = e.target.value; render(); });
 $("#fBars").addEventListener("change", e => { pushUndo(); song.barsPerLine = e.target.value; render(); });
 $("#fNaming").addEventListener("change", e => { pushUndo(); song.naming = e.target.value; render(); });
+$("#fRhythm").addEventListener("change", e => {
+  pushUndo();
+  song.rhythmStyle = e.target.value;
+  refreshMetrics();
+  render();
+});
 $("#fTuning").addEventListener("change", e => {
   const pick = TUNINGS.find(t => t.id === e.target.value);
   if (!pick) return;
@@ -2973,6 +3016,7 @@ function syncFields(){
   $("#fTime").value   = `${song.timeSig.beats}/${song.timeSig.unit}`;
   $("#fBars").value   = song.barsPerLine || "auto";
   $("#fNaming").value = song.naming || "nl";
+  $("#fRhythm").value = rhythmStyle();
   const tsel = $("#fTuning");
   tsel.innerHTML = TUNINGS.map(t =>
       `<option value="${t.id}">${esc(t.label)}</option>`).join("")
@@ -3160,6 +3204,7 @@ function loadSong(obj){
     artist: obj.artist || "",
     timeSig: obj.timeSig || { beats:4, unit:4 },
     naming: obj.naming || "nl",
+    rhythmStyle: obj.rhythmStyle === "stems" ? "stems" : "heads",
     tuning: (Array.isArray(obj.tuning) && obj.tuning.length >= 2)
               ? obj.tuning.slice() : DEFAULT_TUNING.slice(),
     tempo: Math.max(30, Math.min(300, +obj.tempo || 90)),
@@ -3225,7 +3270,7 @@ $("#btnNew").addEventListener("click", () => {
   pushUndo();
   fileHandle = null; fileName = ""; savedText = null;
   rememberHandle(null);
-  song = { version:1, title:"Untitled", artist:"", timeSig:{beats:4,unit:4}, naming:"nl", tuning:DEFAULT_TUNING.slice(), tempo:90, showTempo:true, followRepeats:true, barsPerLine:"auto", octaves:DEFAULT_OCTAVES, sections:[newSection("Intro")] };
+  song = { version:1, title:"Untitled", artist:"", timeSig:{beats:4,unit:4}, naming:"nl", rhythmStyle:"heads", tuning:DEFAULT_TUNING.slice(), tempo:90, showTempo:true, followRepeats:true, barsPerLine:"auto", octaves:DEFAULT_OCTAVES, sections:[newSection("Intro")] };
   cursor = { sec:0, i:0 };
   syncFields();
   render();
