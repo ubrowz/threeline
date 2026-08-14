@@ -111,6 +111,16 @@ function evaluate(expression) {
 
 // --- take what the editor draws -------------------------------------------
 
+// Chrome reports the page as a target before its script has parsed, so wait
+// until the editor is actually there. Without this the run fails at random,
+// depending on how long the file takes to load.
+for (let i = 0; ; i++) {
+  const ready = await evaluate(`typeof newNote === "function" && typeof buildPlan === "function"`);
+  if (ready) break;
+  if (i > 60) throw new Error("the editor never finished loading");
+  await wait(100);
+}
+
 const out = await evaluate(`(() => {
   ${PLAYER_BAR}
   cursor = {sec:0, i:-1}; selAnchor = null;
