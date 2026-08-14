@@ -1199,25 +1199,30 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
         const sx = cx + STEM_DX;
         const d = stems ? dirOf(it.i) : 1;
         const far = stems ? stemEnd(it.i) : STEM_TOP;
-        // where the stem leaves the fret number, or the notehead
-        const from = stems ? stringY(n.string) - 7.5 * d : STEM_BASE - 0.5;
+        // Where the stem leaves the fret number, or the notehead. A note tied
+        // into has no number to leave, so its stem starts on the string itself
+        // rather than hanging clear of a number that was never drawn.
+        const ringed = stems && (n.dur === "w" || n.dur === "h");
+        const gap = ringed ? 9.5 : isTiedInto(notes, it.i) ? 0 : 7.5;
+        const from = stems ? stringY(n.string) - gap * d : STEM_BASE - 0.5;
 
         if (!stems){
           const filled = (n.dur !== "w" && n.dur !== "h");
           s += n.dead ? svgDeadHead(cx, HEAD_Y) : svgHead(cx, HEAD_Y, filled, n.dur === "w");
         }
         if (n.dur !== "w"){
-          const y0 = stems && n.dur === "h" ? stringY(n.string) - 9.5 * d : from;
-          s += `<line x1="${sx}" y1="${y0}" x2="${sx}" y2="${far}" stroke="#2a2e35" stroke-width="1.05"/>`;
+          s += `<line x1="${sx}" y1="${from}" x2="${sx}" y2="${far}" stroke="#2a2e35" stroke-width="1.05"/>`;
           if (!beamed.has(it.i)){
             if (n.dur === "e") s += svgFlag(sx, far, stems ? d : 1);
             if (n.dur === "s") s += svgFlag2(sx, far, stems ? d : 1);
           }
         }
-        // With no heads, a ring at the far end marks the long values: a half
-        // keeps its stem, a whole has none, as in ordinary notation.
-        // a whole or half note is ringed round its fret number; the half keeps
-        // its stem, the whole has none
+        // A note tied into shows no fret number, so the ring that carries its
+        // length has to be drawn here — otherwise a tied half reads as a
+        // quarter, and a tied whole is not drawn at all.
+        if (ringed && isTiedInto(notes, it.i))
+          s += `<ellipse data-ring="1" class="${selected?"selbg":""}" cx="${cx}" cy="${stringY(n.string)}" `
+             + `rx="9" ry="9" fill="${selected?"#fff2c9":"#fff"}" stroke="#2a2e35" stroke-width="1.3"/>`;
         // the dot rides beside the fret number, as it does on paper
         const dotX = stems ? cx + 9 : cx + 9.5;
         const dotY = stems ? stringY(n.string) - 5 : HEAD_Y - 4.5;
