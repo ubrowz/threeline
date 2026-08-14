@@ -239,6 +239,11 @@
             <option value="12/8">12/8</option>
           </select>
         </div>
+        <div class="row"><label>Bass</label>
+          <select class="fld" id="fTuning">
+            <option value="custom" hidden>custom tuning</option>
+          </select>
+        </div>
         <div class="row"><label>Note names</label>
           <select class="fld" id="fNaming">
             <option value="nl">Dutch — Fis, Cis, Bes</option>
@@ -364,10 +369,31 @@
    Model
    ============================================================ */
 
-// Strings low → high. 4-string standard tuning.
-const TUNING = [28, 33, 38, 43];            // MIDI: E1 A1 D2 G2
-const STRING_LABEL = ["E", "A", "D", "G"];
-const NSTR = 4;
+// Open strings as MIDI numbers, lowest first. Anything from four to six works;
+// the staff, the fretboard diagram and the string picker all follow the length.
+const TUNINGS = [
+  { id:"b4",     label:"4-string · E A D G",       midi:[28,33,38,43] },
+  { id:"b4drop", label:"4-string · drop D",        midi:[26,33,38,43] },
+  { id:"b4flat", label:"4-string · half step down",midi:[27,32,37,42] },
+  { id:"b5",     label:"5-string · B E A D G",     midi:[23,28,33,38,43] },
+  { id:"b5hi",   label:"5-string · E A D G C",     midi:[28,33,38,43,48] },
+  { id:"b6",     label:"6-string · B E A D G C",   midi:[23,28,33,38,43,48] }
+];
+const DEFAULT_TUNING = TUNINGS[0].midi;
+
+function tuning(){
+  const t = song && song.tuning;
+  return (Array.isArray(t) && t.length >= 2) ? t : DEFAULT_TUNING;
+}
+function tuningId(){
+  const t = tuning().join(",");
+  const hit = TUNINGS.find(x => x.midi.join(",") === t);
+  return hit ? hit.id : "custom";
+}
+// An open string is named by its pitch, so a drop D reads D A D G.
+function stringLabel(s){ return toneName(((tuning()[s] % 12) + 12) % 12, null); }
+
+let NSTR = DEFAULT_TUNING.length;
 
 // Note-name spellings. `def` is what a note gets when you haven't picked an
 // enharmonic by hand; the sharp/flat tables back the `n` key. Both languages
@@ -452,6 +478,7 @@ function demoSong(){
     artist: "",
     timeSig: { beats:4, unit:4 },
     naming: "nl",
+    tuning: DEFAULT_TUNING.slice(),
     tempo: 90,
     followRepeats: true,
     barsPerLine: "auto",
@@ -536,7 +563,38 @@ function selectSection(){
 // A note that is the tail of a tie shows no fret number and no name.
 function isTiedInto(notes, i){ return i > 0 && notes[i-1].tie && !notes[i].rest && !notes[i-1].rest; }
 
-function midiOf(n){ return TUNING[n.string] + n.fret; }
+function midiOf(n){
+  const t = tuning();
+  return t[Math.min(n.string, t.length - 1)] + n.fret;
+}
+
+// Changing tuning must not transpose the music. String 0 is the lowest string,
+// so adding a low B would shift every index down a string; instead each note is
+// moved to wherever its own pitch now lives, keeping the hand as close as it can.
+function retune(next){
+  const old = tuning();
+  for (const sec of song.sections){
+    for (const n of sec.notes){
+      if (n.rest){ n.string = Math.min(n.string, next.length - 1); continue; }
+      const midi = old[Math.min(n.string, old.length - 1)] + n.fret;
+      let best = null;
+      for (let s = 0; s < next.length; s++){
+        const f = midi - next[s];
+        if (f < 0 || f > 24) continue;
+        const cost = Math.abs(f - n.fret);
+        if (!best || cost < best.cost) best = { s, f, cost };
+      }
+      if (best){ n.string = best.s; n.fret = best.f; }
+      else {                                   // outside the new instrument
+        const s = midi < next[0] ? 0 : next.length - 1;
+        n.string = s;
+        n.fret = Math.max(0, Math.min(24, midi - next[s]));
+      }
+    }
+  }
+  song.tuning = next.slice();
+  refreshMetrics();
+}
 
 function nameOf(n){
   const m = midiOf(n), pc = ((m % 12) + 12) % 12;
@@ -600,6 +658,7 @@ function step(from, to){
   to.push(snapshot());
   song = JSON.parse(from.pop());
   undoTag = null;
+  refreshMetrics();
   clampCursor();
   syncFields();
   render();
@@ -609,6 +668,7 @@ function redo(){ step(redoStack, undoStack); }
 function clampCursor(){
   cursor.sec = Math.max(0, Math.min(cursor.sec, song.sections.length - 1));
   cursor.i   = Math.max(0, Math.min(cursor.i, curNotes().length));
+  entry.string = Math.max(0, Math.min(entry.string, tuning().length - 1));
   pendingFret = null;
 }
 
@@ -624,9 +684,17 @@ const HEAD_Y      = 46;   // rhythm note-head centre line
 const STEM_TOP    = 14;
 const STAFF_TOP   = 74;
 const STR_GAP     = 15;
-const STAFF_BOT   = STAFF_TOP + STR_GAP * (NSTR - 1);
-const NAME_Y      = STAFF_BOT + 25;
-const LYRIC_Y     = NAME_Y + 19;
+let STAFF_BOT = STAFF_TOP + STR_GAP * (NSTR - 1);
+let NAME_Y    = STAFF_BOT + 25;
+let LYRIC_Y   = NAME_Y + 19;
+
+// The staff grows downward with each extra string, so everything under it moves.
+function refreshMetrics(){
+  NSTR = tuning().length;
+  STAFF_BOT = STAFF_TOP + STR_GAP * (NSTR - 1);
+  NAME_Y = STAFF_BOT + 25;
+  LYRIC_Y = NAME_Y + 19;
+}
 
 const FONT_FRET  = "600 12.5px system-ui,-apple-system,sans-serif";
 const FONT_NAME  = "500 12.5px system-ui,-apple-system,sans-serif";
@@ -699,6 +767,7 @@ function barsPerLine(){
 
 // → [{ measures:[{items:[{i,x,w}], x, w}], width }]
 function layoutSection(sec){
+  refreshMetrics();
   const notes = sec.notes;
   const measures = splitMeasures(notes).map(m => {
     const first = m.idx.length ? m.idx[0] : -1;
@@ -1125,6 +1194,7 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
    ============================================================ */
 
 function render(){
+  refreshMetrics();
   const page = $("#page");
   let html = "";
 
@@ -1223,8 +1293,8 @@ function renderSidebar(){
       <div class="empty" style="margin-bottom:9px">At the end — type a fret number to add a note.</div>
       <div class="row"><label>Length</label><div class="grid" style="flex:1">${durBtns}</div></div>
       <div class="row"><label>String</label>
-        <select class="fld" data-str>${STRING_LABEL.map((l,i)=>
-          `<option value="${i}" ${entry.string===i?"selected":""}>${l}</option>`).reverse().join("")}</select>
+        <select class="fld" data-str>${tuning().map((_,i)=>
+          `<option value="${i}" ${entry.string===i?"selected":""}>${esc(stringLabel(i))}</option>`).reverse().join("")}</select>
       </div>
       <div class="row"><label>Dot</label>
         <button class="btn ${entry.dots?"on":""}" data-dot style="flex:1">${entry.dots?"dotted":"none"}</button>
@@ -1260,8 +1330,8 @@ function renderSidebar(){
       </div>`}
       ${n.rest ? "" : `
       <div class="row"><label>String</label>
-        <select class="fld" data-str>${STRING_LABEL.map((l,i)=>
-          `<option value="${i}" ${n.string===i?"selected":""}>${l}</option>`).reverse().join("")}</select>
+        <select class="fld" data-str>${tuning().map((_,i)=>
+          `<option value="${i}" ${n.string===i?"selected":""}>${esc(stringLabel(i))}</option>`).reverse().join("")}</select>
       </div>
       <div class="row"><label>Fret</label>
         <input class="fld" type="number" min="0" max="24" data-fret value="${n.fret}">
@@ -1332,7 +1402,7 @@ function renderStatus(){
   const n = curNote();
   $("#stNote").innerHTML = n
     ? (n.rest ? `<b>${DUR_LABEL[n.dur]}${n.dots?" dotted":""} rest</b>`
-              : `<b>${nameOf(n)}</b> · ${STRING_LABEL[n.string]}-string fret ${n.fret} · ${DUR_LABEL[n.dur]}${n.dots?" dotted":""}`)
+              : `<b>${nameOf(n)}</b> · ${esc(stringLabel(n.string))}-string fret ${n.fret} · ${DUR_LABEL[n.dur]}${n.dots?" dotted":""}`)
     : "";
 }
 
@@ -1822,8 +1892,9 @@ function chordInEffect(){
 const FB = { frets:12, nut:24, step:18.4, top:13, gap:20, r:7.2 };
 
 function fretboard(chord){
+  refreshMetrics();
   const W = FB.nut + FB.frets * FB.step + 10;
-  const H = FB.top + 3 * FB.gap + 30;
+  const H = FB.top + (NSTR - 1) * FB.gap + 30;
   const y = s => FB.top + (NSTR - 1 - s) * FB.gap;
   const x = f => f === 0 ? FB.nut - 13 : FB.nut + (f - 0.5) * FB.step;
   const pcs = new Map(chord.tones.map(t => [t.pc, t.degree]));
@@ -1842,11 +1913,11 @@ function fretboard(chord){
     g += `<text x="${FB.nut + (f-0.5)*FB.step}" y="${H-16}" text-anchor="middle" font-size="9" `
        + `fill="var(--ink-2)">${f}</text>`;
   for (let st = 0; st < NSTR; st++)
-    g += `<text x="4" y="${y(st)+3.5}" font-size="9" font-weight="600" fill="var(--ink-2)">${STRING_LABEL[st]}</text>`;
+    g += `<text x="4" y="${y(st)+3.5}" font-size="9" font-weight="600" fill="var(--ink-2)">${esc(stringLabel(st))}</text>`;
 
   for (let st = 0; st < NSTR; st++){
     for (let f = 0; f <= FB.frets; f++){
-      const pc = ((TUNING[st] + f) % 12 + 12) % 12;
+      const pc = ((tuning()[st] + f) % 12 + 12) % 12;
       if (!pcs.has(pc)) continue;
       const isRoot = pc === chord.rootPc;
       const isBass = chord.bassPc !== null && pc === chord.bassPc;
@@ -1857,7 +1928,7 @@ function fretboard(chord){
          + `stroke="var(--accent)" stroke-width="1.4"/>`
          + `<text x="${x(f)}" y="${y(st)+3}" text-anchor="middle" font-size="8" font-weight="700" `
          + `fill="${ink}" style="pointer-events:none">${pcs.get(pc).replace(/[♭♯]/,"")}</text>`
-         + `<title>${STRING_LABEL[st]} string, fret ${f} — ${pcs.get(pc)}</title></g>`;
+         + `<title>${esc(stringLabel(st))} string, fret ${f} — ${pcs.get(pc)}</title></g>`;
     }
   }
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;overflow:visible">${g}</svg>`;
@@ -2842,6 +2913,15 @@ $("#fTime").addEventListener("change", e => {
 $("#fOct").addEventListener("change", e => { pushUndo(); song.octaves = e.target.value; render(); });
 $("#fBars").addEventListener("change", e => { pushUndo(); song.barsPerLine = e.target.value; render(); });
 $("#fNaming").addEventListener("change", e => { pushUndo(); song.naming = e.target.value; render(); });
+$("#fTuning").addEventListener("change", e => {
+  const pick = TUNINGS.find(t => t.id === e.target.value);
+  if (!pick) return;
+  pushUndo();
+  retune(pick.midi);          // each note moves to where its own pitch now lives
+  clampCursor();
+  syncFields();
+  render();
+});
 
 function syncFields(){
   $("#fTitle").value  = song.title === "Untitled" ? "" : song.title;
@@ -2849,6 +2929,11 @@ function syncFields(){
   $("#fTime").value   = `${song.timeSig.beats}/${song.timeSig.unit}`;
   $("#fBars").value   = song.barsPerLine || "auto";
   $("#fNaming").value = song.naming || "nl";
+  const tsel = $("#fTuning");
+  tsel.innerHTML = TUNINGS.map(t =>
+      `<option value="${t.id}">${esc(t.label)}</option>`).join("")
+    + `<option value="custom" hidden>custom tuning</option>`;
+  tsel.value = tuningId();
   $("#fTempo").value  = song.tempo || 90;
   $("#fRepeats").checked = song.followRepeats !== false;
   $("#fOct").value    = song.octaves || "off";
@@ -2878,6 +2963,8 @@ function loadSong(obj){
     artist: obj.artist || "",
     timeSig: obj.timeSig || { beats:4, unit:4 },
     naming: obj.naming || "nl",
+    tuning: (Array.isArray(obj.tuning) && obj.tuning.length >= 2)
+              ? obj.tuning.slice() : DEFAULT_TUNING.slice(),
     tempo: Math.max(30, Math.min(300, +obj.tempo || 90)),
     followRepeats: obj.followRepeats !== false,
     barsPerLine: obj.barsPerLine || "auto",
@@ -2895,6 +2982,7 @@ function loadSong(obj){
   if (!song.sections.length) song.sections = [newSection("")];
   cursor = { sec:0, i:0 };
   undoStack = [];
+  refreshMetrics();
   syncFields();
   render();
 }
@@ -2931,7 +3019,7 @@ $("#btnRedo").addEventListener("click", redo);
 $("#btnNew").addEventListener("click", () => {
   if (!confirm("Start a new, empty transcription? Save first if you want to keep this one.")) return;
   pushUndo();
-  song = { version:1, title:"Untitled", artist:"", timeSig:{beats:4,unit:4}, naming:"nl", tempo:90, followRepeats:true, barsPerLine:"auto", octaves:DEFAULT_OCTAVES, sections:[newSection("Intro")] };
+  song = { version:1, title:"Untitled", artist:"", timeSig:{beats:4,unit:4}, naming:"nl", tuning:DEFAULT_TUNING.slice(), tempo:90, followRepeats:true, barsPerLine:"auto", octaves:DEFAULT_OCTAVES, sections:[newSection("Intro")] };
   cursor = { sec:0, i:0 };
   syncFields();
   render();
