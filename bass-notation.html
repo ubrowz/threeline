@@ -928,13 +928,20 @@ function svgRest(x, dur, dots){
     g = `<path d="M${x-3.5},${y-15} l6,7.5 l-5.5,6 l6.5,7.5 c-4,-2.5 -8,-0.5 -6.5,3.5 `
       + `c-3.5,-3.5 -1,-8.5 4,-7 l-6,-7 l5.5,-6 z" fill="#2a2e35"/>`;
   } else {
-    // eighth / sixteenth: slanted stroke with 1 or 2 dot-hooks
+    // Eighth and sixteenth: a slanted stroke with one or two flags. Each flag
+    // sweeps up from its blob onto the stroke — it curled downwards before,
+    // which is the shape upside down.
     const n = dur === "s" ? 2 : 1;
-    g = `<path d="M${x+3.5},${y-11} L${x-3},${y+9}" stroke="#2a2e35" stroke-width="1.15" fill="none"/>`;
+    const x0 = x + 3.5, y0 = y - 11, x1 = x - 3, y1 = y + 9;
+    g = `<path d="M${x0},${y0} L${x1},${y1}" stroke="#2a2e35" stroke-width="1.15" fill="none"/>`;
     for (let k = 0; k < n; k++){
-      const cy = y - 9 + k * 8, cx = x - 2.5 + k * 2.6;
-      g += `<circle cx="${cx}" cy="${cy}" r="2.05" fill="#2a2e35"/>`
-         + `<path d="M${cx},${cy-1.5} c3.4,-0.9 5.5,0.9 6,3.4" stroke="#2a2e35" stroke-width="1.25" fill="none"/>`;
+      const t = k * 0.46;
+      const ax = x0 + (x1 - x0) * t, ay = y0 + (y1 - y0) * t;   // where it meets the stroke
+      const bx = ax - 5.6, by = ay + 1.6;                        // the blob
+      const sx = bx + 0.2, sy = by - 1.8;
+      g += `<circle cx="${bx}" cy="${by}" r="2.05" fill="#2a2e35"/>`
+         + `<path d="M${sx},${sy} C${sx+2.8},${sy-1.1} ${ax-1.8},${ay-1} ${ax},${ay}" `
+         + `stroke="#2a2e35" stroke-width="1.25" fill="none"/>`;
     }
   }
   for (let d = 0; d < dots; d++) g += `<circle cx="${x + 9.5 + d*4}" cy="${y}" r="1.6" fill="#2a2e35"/>`;
