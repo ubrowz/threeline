@@ -714,7 +714,7 @@ let LYRIC_Y   = NAME_Y + 19;
 function rhythmStyle(){ return song && song.rhythmStyle === "stems" ? "stems" : "heads"; }
 
 let STEM_BASE = 46, STEM_DX = 4.2, REST_Y = 46, TIE_Y = 53.5, TUP_Y = 5;
-let UP_BEAM = 21, DOWN_BEAM = 0;     // where beams sit, above and below the staff
+const STEM_LEN = 18;                 // every stem the same length, in the stems style
 
 // The staff grows downward with each extra string, so everything under it moves.
 function refreshMetrics(){
@@ -723,20 +723,17 @@ function refreshMetrics(){
 
   STEM_TOP  = stems ? 14 : 21;
   HEAD_Y    = stems ? 0  : 46;
-  STAFF_TOP = stems ? 30 : 74;
+  STAFF_TOP = stems ? 12 : 74;
   STAFF_BOT = STAFF_TOP + STR_GAP * (NSTR - 1);
-
-  UP_BEAM   = stems ? STAFF_TOP - 16 : STEM_TOP;
-  DOWN_BEAM = STAFF_BOT + 16;
 
   STEM_BASE = HEAD_Y;
   STEM_DX   = stems ? 0 : 4.2;                  // heads carry their stem on the right
   REST_Y    = stems ? (STAFF_TOP + STAFF_BOT) / 2 : HEAD_Y;
-  TIE_Y     = stems ? DOWN_BEAM + 9 : HEAD_Y + 7.5;
-  TUP_Y     = stems ? UP_BEAM - 11 : 5;
-  CHORD_Y   = stems ? UP_BEAM - 11 : 9;
+  TIE_Y     = stems ? STAFF_BOT + 9 : HEAD_Y + 7.5;
+  TUP_Y     = stems ? -4 : 5;
+  CHORD_Y   = stems ? STAFF_TOP - 8 : 9;
 
-  NAME_Y  = stems ? DOWN_BEAM + 32 : STAFF_BOT + 25;   // a tie hangs under the beam
+  NAME_Y  = STAFF_BOT + 25;
   LYRIC_Y = NAME_Y + 19;
 }
 
@@ -1031,9 +1028,10 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
   // In the stems style a stem grows out of the fret number itself: up from the
   // two lowest strings, down from the two highest, as printed tab does. Notes
   // under one beam have to agree, so the group votes.
-  const stemDir = new Map();
+  const stemDir = new Map(), stemY = new Map();
   if (rhythmStyle() === "stems"){
     const own = n => (n.string < NSTR / 2 ? 1 : -1);
+    const rest = (i, d) => stringY(notes[i].string) - (7.5 + STEM_LEN) * d;   // left alone
     for (const mm of sys.measures){
       for (const g of beamGroups(notes, mm)){
         if (g.items.length < 2) continue;
@@ -1041,13 +1039,36 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
         for (const it of g.items) vote += own(notes[it.i]);
         const d = vote >= 0 ? 1 : -1;
         for (const it of g.items) stemDir.set(it.i, d);
+
+        // One straight beam over the group, tilted towards the shape of the
+        // line but not steeply, then every stem drawn out to meet it.
+        const xs = g.items.map(it => mm.x + it.x + it.w/2);
+        const want = g.items.map(it => rest(it.i, d));
+        const span = xs[xs.length-1] - xs[0] || 1;
+        let a = want[0], b = want[want.length-1];
+        const MAX_TILT = 14;
+        if (Math.abs(b - a) > MAX_TILT){
+          const mid = (a + b) / 2, half = MAX_TILT / 2 * Math.sign(b - a);
+          a = mid - half; b = mid + half;
+        }
+        const at = x => a + (b - a) * (x - xs[0]) / span;
+        // no stem may end up shorter than this, so push the whole beam clear
+        let push = 0;
+        g.items.forEach((it, j) => {
+          const limit = stringY(notes[it.i].string) - (7.5 + 9) * d;
+          const over = d > 0 ? at(xs[j]) - limit : limit - at(xs[j]);
+          if (over > 0) push = d > 0 ? Math.min(push, -over) : Math.max(push, over);
+        });
+        g.items.forEach((it, j) => stemY.set(it.i, at(xs[j]) + push));
       }
       for (const it of mm.items)
         if (!stemDir.has(it.i) && !notes[it.i].rest) stemDir.set(it.i, own(notes[it.i]));
     }
   }
   const dirOf = i => stemDir.get(i) || 1;
-  const beamY = d => (d === -1 ? DOWN_BEAM : UP_BEAM);
+  // a free stem is a fixed length; a beamed one runs to its group's beam
+  const stemEnd = i => stemY.has(i) ? stemY.get(i)
+                     : stringY(notes[i].string) - (7.5 + STEM_LEN) * dirOf(i);
 
   // ---- triplet brackets, just above the beams ----------------------
   if (showTups){
@@ -1127,18 +1148,27 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
       if (g.items.length < 2){ continue; }
       const xs = g.items.map(it => m.x + it.x + it.w/2 + STEM_DX);
       const x1 = xs[0], x2 = xs[xs.length-1];
+      const stems = rhythmStyle() === "stems";
       const gd = dirOf(g.items[0].i);
-      const by = rhythmStyle() === "stems" ? beamY(gd) : STEM_TOP;
-      const step = rhythmStyle() === "stems" ? 5 * gd : 5;
-      s += `<rect x="${x1}" y="${by}" width="${x2-x1}" height="2.5" fill="#2a2e35"/>`;
+      const step = stems ? 5 * gd : 5;
+      const ys = stems ? g.items.map(it => stemEnd(it.i)) : xs.map(() => STEM_TOP);
+      const t = 2.5 * (stems ? gd : 1);
+      const bar = (j, k, off) =>
+        `<polygon points="${xs[j]},${ys[j]+off} ${xs[k]},${ys[k]+off} `
+        + `${xs[k]},${ys[k]+off+t} ${xs[j]},${ys[j]+off+t}" fill="#2a2e35"/>`;
+      s += bar(0, xs.length - 1, 0);
       // secondary beam over runs of 16ths
       let run = [];
       const flush = () => {
         if (run.length >= 2){
-          s += `<rect x="${run[0]}" y="${STEM_TOP+5}" width="${run[run.length-1]-run[0]}" height="2.5" fill="#2a2e35"/>`;
+          s += bar(xs.indexOf(run[0]), xs.indexOf(run[run.length-1]), step);
         } else if (run.length === 1){
-          const solo = run[0], dir = solo === x1 ? 1 : -1;
-          s += `<rect x="${dir>0?solo:solo-8}" y="${STEM_TOP+5}" width="7" height="2.5" fill="#2a2e35"/>`;
+          // a lone sixteenth gets a stub, pointing back into its group
+          const j = xs.indexOf(run[0]), back = j === 0 ? 1 : -1;
+          const slope = (ys[ys.length-1] - ys[0]) / ((xs[xs.length-1] - xs[0]) || 1);
+          const x0 = back > 0 ? xs[j] : xs[j] - 8, x2b = x0 + 8;
+          const ya = ys[j] + step + slope * (x0 - xs[j]), yb = ya + slope * 8;
+          s += `<polygon points="${x0},${ya} ${x2b},${yb} ${x2b},${yb+t} ${x0},${ya+t}" fill="#2a2e35"/>`;
         }
         run = [];
       };
@@ -1162,7 +1192,7 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
       } else {
         const sx = cx + STEM_DX;
         const d = stems ? dirOf(it.i) : 1;
-        const far = stems ? beamY(d) : STEM_TOP;
+        const far = stems ? stemEnd(it.i) : STEM_TOP;
         // where the stem leaves the fret number, or the notehead
         const from = stems ? stringY(n.string) - 7.5 * d : STEM_BASE - 0.5;
 
@@ -1171,7 +1201,8 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
           s += n.dead ? svgDeadHead(cx, HEAD_Y) : svgHead(cx, HEAD_Y, filled, n.dur === "w");
         }
         if (n.dur !== "w"){
-          s += `<line x1="${sx}" y1="${from}" x2="${sx}" y2="${far}" stroke="#2a2e35" stroke-width="1.05"/>`;
+          const y0 = stems && n.dur === "h" ? stringY(n.string) - 9.5 * d : from;
+          s += `<line x1="${sx}" y1="${y0}" x2="${sx}" y2="${far}" stroke="#2a2e35" stroke-width="1.05"/>`;
           if (!beamed.has(it.i)){
             if (n.dur === "e") s += svgFlag(sx, far, stems ? d : 1);
             if (n.dur === "s") s += svgFlag2(sx, far, stems ? d : 1);
@@ -1179,9 +1210,8 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
         }
         // With no heads, a ring at the far end marks the long values: a half
         // keeps its stem, a whole has none, as in ordinary notation.
-        if (stems && (n.dur === "h" || n.dur === "w"))
-          s += `<circle cx="${sx}" cy="${n.dur === "w" ? stringY(n.string) - 11 * d : far}" r="3" `
-             + `fill="#fff" stroke="#2a2e35" stroke-width="1.2"/>`;
+        // a whole or half note is ringed round its fret number; the half keeps
+        // its stem, the whole has none
         // the dot rides beside the fret number, as it does on paper
         const dotX = stems ? cx + 9 : cx + 9.5;
         const dotY = stems ? stringY(n.string) - 5 : HEAD_Y - 4.5;
@@ -1245,7 +1275,15 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
         const y = stringY(n.string);
         const t = n.dead ? "x" : String(n.fret);
         const tw = textW(t, FONT_FRET);
-        s += `<rect class="${selected?"selbg":""}" x="${cx - tw/2 - 2.5}" y="${y-7}" width="${tw+5}" height="14" fill="${selected?"#fff2c9":"#fff"}"/>`;
+        // In the stems style the long values are shown by ringing the number:
+        // a half keeps its stem, a whole has none.
+        const ring = rhythmStyle() === "stems" && (n.dur === "w" || n.dur === "h");
+        const rr = Math.max(9, tw/2 + 3.5);
+        if (ring)
+          s += `<ellipse data-ring="1" class="${selected?"selbg":""}" cx="${cx}" cy="${y}" rx="${rr}" ry="9" `
+             + `fill="${selected?"#fff2c9":"#fff"}" stroke="#2a2e35" stroke-width="1.3"/>`;
+        else
+          s += `<rect class="${selected?"selbg":""}" x="${cx - tw/2 - 2.5}" y="${y-7}" width="${tw+5}" height="14" fill="${selected?"#fff2c9":"#fff"}"/>`;
         s += `<text x="${cx}" y="${y+4.4}" text-anchor="middle" `
            + `font-size="12.5" font-weight="600" font-family="system-ui,-apple-system,sans-serif" fill="#2a2e35">${t}</text>`;
         // --- note name row (a dead note has no pitch to name) ---
