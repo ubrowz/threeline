@@ -1381,7 +1381,8 @@ function renderSidebar(){
         <input class="fld" data-chord id="chordInput" value="${esc(n.chord)}" placeholder="e.g. F#m">
       </div>
       <div class="row"><label>Lyric</label>
-        <input class="fld" data-lyric id="lyricInput" value="${esc(n.lyric)}" placeholder="syllable">
+        <input class="fld" data-lyric id="lyricInput" value="${esc(n.lyric)}" placeholder="syllable"
+          title="Enter or Tab moves to the next note. Spaces are just spaces.">
       </div>
       <div class="row" style="margin-top:10px"><label style="font-weight:600;color:var(--ink)">This bar</label></div>
       <div class="row"><label>Repeat</label>
@@ -2646,12 +2647,16 @@ document.addEventListener("keydown", e => {
   }
   if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === "p"){ return; }
 
-  // Chord and lyric fields: space / enter / tab move to the next note and keep
-  // typing, so a whole line can be entered without reaching for the mouse.
+  // Chord and lyric fields: enter or tab moves to the next note and keeps you
+  // typing, so a line can be entered without reaching for the mouse. Space does
+  // that in the chord field, where a symbol never contains one, but not in the
+  // lyric field — a word or two can sit under a single note.
   const af = document.activeElement;
   if (af && (af.id === "lyricInput" || af.id === "chordInput")){
     const id = af.id, key = id === "chordInput" ? "chord" : "lyric";
-    if (k === "Enter" || k === "Tab" || (k === " " && !e.shiftKey)){
+    const onward = k === "Enter" || k === "Tab"
+                || (k === " " && !e.shiftKey && id === "chordInput");
+    if (onward){
       e.preventDefault();
       commitText(key, af.value);
       moveCursor(1);
