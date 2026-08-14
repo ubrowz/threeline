@@ -681,7 +681,7 @@ const PAD_X     = 40;
 const CONTENT_W = PAGE_W - PAD_X * 2;   // 740
 
 const HEAD_Y      = 46;   // rhythm note-head centre line
-const STEM_TOP    = 14;
+const STEM_TOP    = 21;
 const STAFF_TOP   = 74;
 const STR_GAP     = 15;
 let STAFF_BOT = STAFF_TOP + STR_GAP * (NSTR - 1);
@@ -703,7 +703,7 @@ const FONT_CHORD = "700 13px system-ui,-apple-system,sans-serif";
 const CHORD_H    = 26;   // extra height a section needs when it carries chords
 const TUP_BAND   = 14;   // headroom for triplet brackets, just above the beams
 const VOLTA_BAND = 20;   // headroom for 1st / 2nd ending brackets, at the top
-const CHORD_Y    = 2;    // baseline, in body coordinates — sits just above the stems,
+const CHORD_Y    = 9;    // baseline, in body coordinates — sits just above the stems,
                          // so the slack in the chord band falls above the text and the
                          // chord groups with its own rhythm row rather than the system above
 
@@ -857,25 +857,25 @@ function beamGroups(notes, measure){
    ============================================================ */
 
 function svgHead(x, y, filled, whole){
-  const rx = whole ? 6.6 : 5.3, ry = whole ? 4.4 : 4.05;
+  const rx = whole ? 5.5 : 4.45, ry = whole ? 3.7 : 3.4;
   const fill = filled ? "#111" : "none";
-  const sw = filled ? 0 : 1.7;
+  const sw = filled ? 0 : 1.3;
   return `<ellipse cx="${x}" cy="${y}" rx="${rx}" ry="${ry}" transform="rotate(-20 ${x} ${y})" `
-       + `fill="${fill}" stroke="#111" stroke-width="${sw}"/>`;
+       + `fill="${fill}" stroke="#2a2e35" stroke-width="${sw}"/>`;
 }
 
 function svgDeadHead(x, y){
-  const r = 4.3;
-  return `<line x1="${x-r}" y1="${y-r}" x2="${x+r}" y2="${y+r}" stroke="#111" stroke-width="1.8"/>`
-       + `<line x1="${x-r}" y1="${y+r}" x2="${x+r}" y2="${y-r}" stroke="#111" stroke-width="1.8"/>`;
+  const r = 3.6;
+  return `<line x1="${x-r}" y1="${y-r}" x2="${x+r}" y2="${y+r}" stroke="#2a2e35" stroke-width="1.45"/>`
+       + `<line x1="${x-r}" y1="${y+r}" x2="${x+r}" y2="${y-r}" stroke="#2a2e35" stroke-width="1.45"/>`;
 }
 
 function svgFlag(x, y){
   // one flag (eighth) hanging off the stem top, drawn to the right
-  return `<path d="M${x},${y} c 6,3 9.5,7.5 8.5,14 c 3.5,-8 1.5,-13 -8.5,-18 z" fill="#111"/>`;
+  return `<path d="M${x},${y} c 5,2.5 8,6.2 7,11.6 c 3,-6.6 1.3,-10.8 -7,-14.9 z" fill="#2a2e35"/>`;
 }
 function svgFlag2(x, y){
-  return svgFlag(x, y) + svgFlag(x, y + 7.5);
+  return svgFlag(x, y) + svgFlag(x, y + 6);
 }
 
 const BAR_INK = "#33383f";
@@ -908,26 +908,26 @@ function svgRest(x, dur, dots){
   let g = "";
   if (dur === "w"){
     // hangs below its reference line
-    g = `<line x1="${x-11}" y1="${y-9}" x2="${x+11}" y2="${y-9}" stroke="#9aa0a8" stroke-width="1"/>`
-      + `<rect x="${x-7}" y="${y-9}" width="14" height="5.5" fill="#111"/>`;
+    g = `<line x1="${x-9.5}" y1="${y-8}" x2="${x+9.5}" y2="${y-8}" stroke="#9aa0a8" stroke-width="1"/>`
+      + `<rect x="${x-6}" y="${y-8}" width="12" height="4.5" fill="#2a2e35"/>`;
   } else if (dur === "h"){
     // sits on top of its reference line
-    g = `<line x1="${x-11}" y1="${y+2.5}" x2="${x+11}" y2="${y+2.5}" stroke="#9aa0a8" stroke-width="1"/>`
-      + `<rect x="${x-7}" y="${y-3}" width="14" height="5.5" fill="#111"/>`;
+    g = `<line x1="${x-9.5}" y1="${y+2}" x2="${x+9.5}" y2="${y+2}" stroke="#9aa0a8" stroke-width="1"/>`
+      + `<rect x="${x-6}" y="${y-2.5}" width="12" height="4.5" fill="#2a2e35"/>`;
   } else if (dur === "q"){
     g = `<path d="M${x-3.5},${y-15} l6,7.5 l-5.5,6 l6.5,7.5 c-4,-2.5 -8,-0.5 -6.5,3.5 `
-      + `c-3.5,-3.5 -1,-8.5 4,-7 l-6,-7 l5.5,-6 z" fill="#111"/>`;
+      + `c-3.5,-3.5 -1,-8.5 4,-7 l-6,-7 l5.5,-6 z" fill="#2a2e35"/>`;
   } else {
     // eighth / sixteenth: slanted stroke with 1 or 2 dot-hooks
     const n = dur === "s" ? 2 : 1;
-    g = `<path d="M${x+3.5},${y-11} L${x-3},${y+9}" stroke="#111" stroke-width="1.7" fill="none"/>`;
+    g = `<path d="M${x+3.5},${y-11} L${x-3},${y+9}" stroke="#2a2e35" stroke-width="1.15" fill="none"/>`;
     for (let k = 0; k < n; k++){
       const cy = y - 9 + k * 8, cx = x - 2.5 + k * 2.6;
-      g += `<circle cx="${cx}" cy="${cy}" r="2.4" fill="#111"/>`
-         + `<path d="M${cx},${cy-1.5} c4,-1 6.5,1 7,4" stroke="#111" stroke-width="1.5" fill="none"/>`;
+      g += `<circle cx="${cx}" cy="${cy}" r="2.05" fill="#2a2e35"/>`
+         + `<path d="M${cx},${cy-1.5} c3.4,-0.9 5.5,0.9 6,3.4" stroke="#2a2e35" stroke-width="1.25" fill="none"/>`;
     }
   }
-  for (let d = 0; d < dots; d++) g += `<circle cx="${x + 11 + d*4.5}" cy="${y}" r="1.9" fill="#111"/>`;
+  for (let d = 0; d < dots; d++) g += `<circle cx="${x + 9.5 + d*4}" cy="${y}" r="1.6" fill="#2a2e35"/>`;
   return g;
 }
 
@@ -1048,17 +1048,17 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
     // beams first, so we know which stems skip their flag
     for (const g of beamGroups(notes, m)){
       if (g.items.length < 2){ continue; }
-      const xs = g.items.map(it => m.x + it.x + it.w/2 + 5.1);
+      const xs = g.items.map(it => m.x + it.x + it.w/2 + 4.2);
       const x1 = xs[0], x2 = xs[xs.length-1];
-      s += `<rect x="${x1}" y="${STEM_TOP}" width="${x2-x1}" height="3.6" fill="#111"/>`;
+      s += `<rect x="${x1}" y="${STEM_TOP}" width="${x2-x1}" height="2.5" fill="#2a2e35"/>`;
       // secondary beam over runs of 16ths
       let run = [];
       const flush = () => {
         if (run.length >= 2){
-          s += `<rect x="${run[0]}" y="${STEM_TOP+6.4}" width="${run[run.length-1]-run[0]}" height="3.6" fill="#111"/>`;
+          s += `<rect x="${run[0]}" y="${STEM_TOP+5}" width="${run[run.length-1]-run[0]}" height="2.5" fill="#2a2e35"/>`;
         } else if (run.length === 1){
           const solo = run[0], dir = solo === x1 ? 1 : -1;
-          s += `<rect x="${dir>0?solo:solo-8}" y="${STEM_TOP+6.4}" width="8" height="3.6" fill="#111"/>`;
+          s += `<rect x="${dir>0?solo:solo-8}" y="${STEM_TOP+5}" width="7" height="2.5" fill="#2a2e35"/>`;
         }
         run = [];
       };
@@ -1082,14 +1082,14 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
         const filled = (n.dur !== "w" && n.dur !== "h");
         s += n.dead ? svgDeadHead(cx, HEAD_Y) : svgHead(cx, HEAD_Y, filled, n.dur === "w");
         if (n.dur !== "w"){
-          s += `<line x1="${cx+5.1}" y1="${HEAD_Y-0.5}" x2="${cx+5.1}" y2="${STEM_TOP}" stroke="#111" stroke-width="1.5"/>`;
+          s += `<line x1="${cx+4.2}" y1="${HEAD_Y-0.5}" x2="${cx+4.2}" y2="${STEM_TOP}" stroke="#2a2e35" stroke-width="1.05"/>`;
           if (!beamed.has(it.i)){
-            if (n.dur === "e") s += svgFlag(cx+5.1, STEM_TOP);
-            if (n.dur === "s") s += svgFlag2(cx+5.1, STEM_TOP);
+            if (n.dur === "e") s += svgFlag(cx+4.2, STEM_TOP);
+            if (n.dur === "s") s += svgFlag2(cx+4.2, STEM_TOP);
           }
         }
         for (let d = 0; d < n.dots; d++)
-          s += `<circle cx="${cx + 11 + d*4.5}" cy="${HEAD_Y-4.5}" r="1.9" fill="#111"/>`;
+          s += `<circle cx="${cx + 9.5 + d*4}" cy="${HEAD_Y-4.5}" r="1.6" fill="#2a2e35"/>`;
       }
 
       // Where the connector runs to. If the following note is on the next line,
@@ -1105,8 +1105,8 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
       if (prev && !pos.has(it.i - 1) && (prev.tie || prev.link)){
         const y0 = HEAD_Y + 7.5, from = Math.max(2, cx - 26);
         s += `<path d="M${from},${y0} Q${(from+cx)/2},${y0+8} ${cx},${y0}" `
-           + `stroke="#111" stroke-width="${prev.tie ? 1.4 : 1.1}" fill="none"`
-           + (prev.tie ? "" : ` opacity="0.75"`) + `/>`;
+           + `stroke="#2a2e35" stroke-width="${prev.tie ? 1.15 : 0.95}" fill="none"`
+           + (prev.tie ? "" : ` opacity="0.7"`) + `/>`;
       }
 
       // --- tie / slur to the next note ---
@@ -1114,7 +1114,7 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
         const x2 = nextX();
         if (x2 !== null){
           const y0 = HEAD_Y + 7.5, mid = (cx + x2) / 2;
-          s += `<path d="M${cx},${y0} Q${mid},${y0+9} ${x2},${y0}" stroke="#111" stroke-width="1.4" fill="none"/>`;
+          s += `<path d="M${cx},${y0} Q${mid},${y0+9} ${x2},${y0}" stroke="#2a2e35" stroke-width="1.15" fill="none"/>`;
         }
       }
 
@@ -1128,18 +1128,18 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
             // the line leans the way the hand travels
             const up = midiOf(link) >= midiOf(n) ? 1 : -1;
             s += `<line x1="${mid-5.5}" y1="${y + 3.6*up}" x2="${mid+5.5}" y2="${y - 3.6*up}" `
-               + `stroke="#111" stroke-width="1.5"/>`;
+               + `stroke="#2a2e35" stroke-width="1.5"/>`;
           } else {
             const letter = midiOf(link) >= midiOf(n) ? "h" : "p";
             s += `<rect x="${mid-4.6}" y="${y-6.5}" width="9.2" height="13" fill="${selected?"#fff2c9":"#fff"}"/>`
                + `<text x="${mid}" y="${y+4}" text-anchor="middle" font-size="10.5" font-weight="700" `
-               + `font-style="italic" font-family="system-ui,-apple-system,sans-serif" fill="#111">${letter}</text>`;
+               + `font-style="italic" font-family="system-ui,-apple-system,sans-serif" fill="#2a2e35">${letter}</text>`;
           }
           // a slur over the pair, as in printed tab
           const y0 = HEAD_Y + 7.5, mx = (cx + x2) / 2;
           if (!n.tie)
-            s += `<path d="M${cx},${y0} Q${mx},${y0+8} ${x2},${y0}" stroke="#111" stroke-width="1.1" `
-               + `fill="none" opacity="0.75"/>`;
+            s += `<path d="M${cx},${y0} Q${mx},${y0+8} ${x2},${y0}" stroke="#2a2e35" stroke-width="0.95" `
+               + `fill="none" opacity="0.7"/>`;
         }
       }
 
@@ -1150,7 +1150,7 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
         const tw = textW(t, FONT_FRET);
         s += `<rect class="${selected?"selbg":""}" x="${cx - tw/2 - 2.5}" y="${y-7}" width="${tw+5}" height="14" fill="${selected?"#fff2c9":"#fff"}"/>`;
         s += `<text x="${cx}" y="${y+4.4}" text-anchor="middle" `
-           + `font-size="12.5" font-weight="600" font-family="system-ui,-apple-system,sans-serif" fill="#111">${t}</text>`;
+           + `font-size="12.5" font-weight="600" font-family="system-ui,-apple-system,sans-serif" fill="#2a2e35">${t}</text>`;
         // --- note name row (a dead note has no pitch to name) ---
         if (!n.dead)
           s += `<text x="${cx}" y="${NAME_Y}" text-anchor="middle" font-size="12.5" font-weight="500" `
