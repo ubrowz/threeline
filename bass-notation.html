@@ -129,6 +129,8 @@
   .grid .btn{padding:5px 0;flex:1;min-width:42px;text-align:center}
   .glyphbtn{font-size:17px;line-height:1}
   .muted{color:var(--ink-2);font-size:12px}
+  #saveState{white-space:nowrap;font-variant-numeric:tabular-nums}
+  #saveState.dirty{color:#9a6b12;font-weight:600}
   .empty{color:var(--ink-2);font-size:12.5px;font-style:italic}
   .chordhead{display:flex;align-items:baseline;gap:8px;margin-bottom:8px}
   .chordhead b{font-size:16px;font-weight:700;letter-spacing:-.01em}
@@ -194,7 +196,8 @@
     <div class="brand">Bass Notation <span>· editor</span></div>
     <button class="btn" id="btnNew">New</button>
     <button class="btn" id="btnOpen">Open…</button>
-    <button class="btn primary" id="btnSave">Save</button>
+    <button class="btn primary" id="btnSave" title="Save (⌘S)">Save</button>
+    <button class="btn" id="btnSaveAs" title="Save to a new file (⇧⌘S)">Save as…</button>
     <button class="btn" id="btnPrint">Print / PDF</button>
     <span style="width:10px"></span>
     <button class="btn" id="btnPlay" title="Play from the selected note, or play the selection (⌘↵)">Play</button>
@@ -1439,9 +1442,9 @@ function renderStatus(){
 }
 
 function persist(){
+  updateFileState();
   try{
     localStorage.setItem(LS_KEY, JSON.stringify(song));
-    $("#saveState").textContent = "autosaved";
   }catch(e){ /* storage may be unavailable from file:// in some browsers */ }
 }
 
@@ -2631,7 +2634,11 @@ document.addEventListener("keydown", e => {
     if (c === "x"){ e.preventDefault(); cutSelection(); return; }
     if (c === "v"){ e.preventDefault(); pasteClipboard(); return; }
   }
-  if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === "s"){ e.preventDefault(); saveFile(); return; }
+  if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === "s"){
+    e.preventDefault();
+    saveFile(e.shiftKey);
+    return;
+  }
   if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === "z"){
     e.preventDefault();
     e.shiftKey ? redo() : undo();
@@ -2976,16 +2983,109 @@ function syncFields(){
    File I/O
    ============================================================ */
 
-function saveFile(){
-  const name = (song.title && song.title !== "Untitled" ? song.title : "bass-transcription")
+// Chrome and Edge can hand back a handle to the file you picked, so saving
+// again writes straight to it. Safari and Firefox cannot, and fall back to a
+// download — which always makes a new file, so the label says so.
+const CAN_PICK = typeof window.showSaveFilePicker === "function"
+              && typeof window.showOpenFilePicker === "function";
+
+let fileHandle = null;     // the file being edited, once one has been chosen
+let fileName = "";
+let savedText = "";        // what was last written, to spot unsaved changes
+
+const FILE_TYPES = [{
+  description: "Threeline transcription",
+  accept: { "application/json": [".json"] }
+}];
+
+function suggestedName(){
+  const base = (song.title && song.title !== "Untitled" ? song.title : "bass-transcription")
     .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  const blob = new Blob([JSON.stringify(song, null, 2)], { type:"application/json" });
+  return (base || "bass-transcription") + ".json";
+}
+
+function songText(){ return JSON.stringify(song, null, 2); }
+
+function updateFileState(){
+  const el = $("#saveState");
+  if (!el) return;
+  const changed = songText() !== savedText;
+  if (!fileName){
+    el.textContent = CAN_PICK ? "not saved to a file" : "autosaved here";
+  } else {
+    el.textContent = fileName + (changed ? " · unsaved changes" : " · saved");
+  }
+  el.classList.toggle("dirty", !!fileName && changed);
+}
+
+async function writable(handle){
+  if (handle.queryPermission){
+    const opts = { mode: "readwrite" };
+    if (await handle.queryPermission(opts) !== "granted"
+        && await handle.requestPermission(opts) !== "granted") return null;
+  }
+  return handle;
+}
+
+async function writeSong(handle){
+  const ok = await writable(handle);
+  if (!ok) return false;
+  const text = songText();
+  const stream = await handle.createWritable();
+  await stream.write(text);
+  await stream.close();
+  fileHandle = handle;
+  fileName = handle.name;
+  savedText = text;
+  updateFileState();
+  return true;
+}
+
+function downloadSong(){        // the fallback: always a new file
+  const text = songText();
+  const blob = new Blob([text], { type:"application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = name + ".json";
+  a.download = suggestedName();
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  $("#saveState").textContent = "saved to file";
+  savedText = text;
+  updateFileState();
+}
+
+// Save writes over the file you chose. Save as always asks.
+async function saveFile(askAgain){
+  if (!CAN_PICK) return downloadSong();
+  try {
+    if (fileHandle && !askAgain){
+      await writeSong(fileHandle);
+      return;
+    }
+    const handle = await window.showSaveFilePicker({
+      suggestedName: fileName || suggestedName(),
+      types: FILE_TYPES
+    });
+    await writeSong(handle);
+  } catch (err){
+    if (err && err.name === "AbortError") return;     // you closed the dialog
+    alert("Could not save:\n" + (err && err.message ? err.message : err));
+  }
+}
+
+async function openFile(){
+  if (!CAN_PICK){ $("#fileInput").click(); return; }
+  try {
+    const [handle] = await window.showOpenFilePicker({ types: FILE_TYPES, multiple: false });
+    const text = await (await handle.getFile()).text();
+    loadSong(JSON.parse(text));
+    fileHandle = handle;                 // so Save writes back to this file
+    fileName = handle.name;
+    savedText = songText();
+    updateFileState();
+  } catch (err){
+    if (err && err.name === "AbortError") return;
+    alert("Could not open that file:\n" + (err && err.message ? err.message : err));
+  }
 }
 
 function loadSong(obj){
@@ -3021,7 +3121,7 @@ function loadSong(obj){
   render();
 }
 
-$("#btnOpen").addEventListener("click", () => $("#fileInput").click());
+$("#btnOpen").addEventListener("click", openFile);
 $("#fileInput").addEventListener("change", e => {
   const f = e.target.files[0];
   if (!f) return;
@@ -3034,7 +3134,8 @@ $("#fileInput").addEventListener("change", e => {
   e.target.value = "";
 });
 
-$("#btnSave").addEventListener("click", saveFile);
+$("#btnSave").addEventListener("click", () => saveFile(false));
+$("#btnSaveAs").addEventListener("click", () => saveFile(true));
 $("#btnPrint").addEventListener("click", () => { stopPlayback(); window.print(); });
 $("#btnPlay").addEventListener("click", togglePlayback);
 $("#btnLoop").addEventListener("click", toggleLoop);
@@ -3058,6 +3159,7 @@ $("#btnRedo").addEventListener("click", redo);
 $("#btnNew").addEventListener("click", () => {
   if (!confirm("Start a new, empty transcription? Save first if you want to keep this one.")) return;
   pushUndo();
+  fileHandle = null; fileName = ""; savedText = "";
   song = { version:1, title:"Untitled", artist:"", timeSig:{beats:4,unit:4}, naming:"nl", tuning:DEFAULT_TUNING.slice(), tempo:90, showTempo:true, followRepeats:true, barsPerLine:"auto", octaves:DEFAULT_OCTAVES, sections:[newSection("Intro")] };
   cursor = { sec:0, i:0 };
   syncFields();
