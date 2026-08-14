@@ -67,6 +67,11 @@
   .songhead{margin:0 0 26px;text-align:center}
   .songhead .t{font-size:23px;font-weight:650;letter-spacing:-.02em}
   .songhead .a{font-size:13px;color:var(--ink-2);margin-top:2px}
+  .songhead .tempo{
+    display:inline-flex;align-items:center;gap:6px;margin-top:10px;
+    font-size:13.5px;color:var(--ink);font-variant-numeric:tabular-nums;
+  }
+  .songhead .tempo svg{display:block}
   .section{margin:0 0 26px}
   .sectionhead{
     font-size:13.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
@@ -224,6 +229,10 @@
         <div class="row"><label>Tempo</label>
           <input class="fld" type="number" id="fTempo" min="30" max="300" step="1" style="flex:0 0 72px">
           <span class="muted">bpm</span>
+        </div>
+        <div class="row"><label>Show tempo</label>
+          <input type="checkbox" id="fShowTempo" style="flex:0 0 auto;margin:0 6px 0 0">
+          <span class="muted">on the sheet</span>
         </div>
         <div class="row"><label>Repeats</label>
           <input type="checkbox" id="fRepeats" style="flex:0 0 auto;margin:0 6px 0 0">
@@ -480,6 +489,7 @@ function demoSong(){
     naming: "nl",
     tuning: DEFAULT_TUNING.slice(),
     tempo: 90,
+    showTempo: true,
     followRepeats: true,
     barsPerLine: "auto",
     octaves: DEFAULT_OCTAVES,
@@ -1193,6 +1203,17 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
    Render
    ============================================================ */
 
+// The tempo marking for the top of the sheet. The note is drawn rather than
+// typed, because the ♩ character is missing from a good many fonts.
+function tempoMark(){
+  const bpm = Math.round(song.tempo || 90);
+  return `<div class="tempo">`
+       + `<svg viewBox="0 0 11 18" width="11" height="18" aria-hidden="true">`
+       + `<ellipse cx="4.1" cy="14" rx="3.5" ry="2.7" transform="rotate(-20 4.1 14)" fill="currentColor"/>`
+       + `<rect x="7.1" y="2" width="1.05" height="12" fill="currentColor"/></svg>`
+       + `<span>= ${bpm}</span></div>`;
+}
+
 function render(){
   refreshMetrics();
   const page = $("#page");
@@ -1200,6 +1221,7 @@ function render(){
 
   html += `<div class="songhead"><div class="t">${esc(song.title || "Untitled")}</div>`;
   if (song.artist) html += `<div class="a">${esc(song.artist)}</div>`;
+  if (song.showTempo !== false) html += tempoMark();
   html += `</div>`;
 
   let barNo = 1;                 // counts on across sections, references excepted
@@ -2936,6 +2958,7 @@ function syncFields(){
   tsel.value = tuningId();
   $("#fTempo").value  = song.tempo || 90;
   $("#fRepeats").checked = song.followRepeats !== false;
+  $("#fShowTempo").checked = song.showTempo !== false;
   $("#fOct").value    = song.octaves || "off";
 }
 
@@ -2966,6 +2989,7 @@ function loadSong(obj){
     tuning: (Array.isArray(obj.tuning) && obj.tuning.length >= 2)
               ? obj.tuning.slice() : DEFAULT_TUNING.slice(),
     tempo: Math.max(30, Math.min(300, +obj.tempo || 90)),
+    showTempo: obj.showTempo !== false,
     followRepeats: obj.followRepeats !== false,
     barsPerLine: obj.barsPerLine || "auto",
     // older files carried a plain on/off flag
@@ -3005,6 +3029,11 @@ $("#btnPrint").addEventListener("click", () => { stopPlayback(); window.print();
 $("#btnPlay").addEventListener("click", togglePlayback);
 $("#btnLoop").addEventListener("click", toggleLoop);
 $("#fRate").addEventListener("change", e => setRate(+e.target.value / 100));
+$("#fShowTempo").addEventListener("change", e => {
+  pushUndo();
+  song.showTempo = e.target.checked;
+  render();
+});
 $("#fRepeats").addEventListener("change", e => {
   song.followRepeats = e.target.checked;
   persist();
@@ -3012,14 +3041,14 @@ $("#fRepeats").addEventListener("change", e => {
 $("#fTempo").addEventListener("input", e => {
   pushUndo("tempo");
   song.tempo = Math.max(30, Math.min(300, +e.target.value || 90));
-  persist();
+  renderKeepFocus();
 });
 $("#btnUndo").addEventListener("click", undo);
 $("#btnRedo").addEventListener("click", redo);
 $("#btnNew").addEventListener("click", () => {
   if (!confirm("Start a new, empty transcription? Save first if you want to keep this one.")) return;
   pushUndo();
-  song = { version:1, title:"Untitled", artist:"", timeSig:{beats:4,unit:4}, naming:"nl", tuning:DEFAULT_TUNING.slice(), tempo:90, followRepeats:true, barsPerLine:"auto", octaves:DEFAULT_OCTAVES, sections:[newSection("Intro")] };
+  song = { version:1, title:"Untitled", artist:"", timeSig:{beats:4,unit:4}, naming:"nl", tuning:DEFAULT_TUNING.slice(), tempo:90, showTempo:true, followRepeats:true, barsPerLine:"auto", octaves:DEFAULT_OCTAVES, sections:[newSection("Intro")] };
   cursor = { sec:0, i:0 };
   syncFields();
   render();
