@@ -24,7 +24,11 @@ const EDITOR = resolve(HERE, "../../bass-notation.html");
 const CHROME =
   process.env.CHROME ||
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const PORT = 9333;
+// A fixed port meant that a Chrome left behind by a crashed run stayed listening
+// with an older copy of the editor loaded, and the next run happily read from
+// it — regenerating art that looked fine and was out of date. A fresh port each
+// run, and a refusal to reuse a live one, makes that impossible.
+const PORT = 9300 + Math.floor(Math.random() * 600);
 
 // --- the demos themselves -------------------------------------------------
 
@@ -66,6 +70,15 @@ const SKETCH_LINE = [
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+async function portIsFree() {
+  try {
+    await fetch(`http://127.0.0.1:${PORT}/json/version`, { signal: AbortSignal.timeout(600) });
+    return false;                      // something is already answering
+  } catch {
+    return true;
+  }
+}
+
 async function target() {
   for (let i = 0; i < 40; i++) {
     try {
@@ -78,6 +91,9 @@ async function target() {
   throw new Error("Chrome did not come up — set CHROME=/path/to/chrome");
 }
 
+if (!(await portIsFree()))
+  throw new Error(`something is already using port ${PORT} — run again`);
+
 const chrome = spawn(CHROME, [
   "--headless",
   "--disable-gpu",
@@ -85,6 +101,10 @@ const chrome = spawn(CHROME, [
   `--user-data-dir=${mkdtempSync(join(tmpdir(), "threeline-"))}`,
   `file://${EDITOR.replace(/ /g, "%20")}`,
 ], { stdio: "ignore" });
+
+const bye = () => { try { chrome.kill(); } catch {} };
+process.on("exit", bye);
+process.on("uncaughtException", (e) => { bye(); throw e; });
 
 const page = await target();
 const ws = new WebSocket(page.webSocketDebuggerUrl);
