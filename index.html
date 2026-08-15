@@ -93,6 +93,19 @@
   p{ margin:0; }
 
   /* an expression mark, the way printed music sets them */
+  /* The mark is the favicon at reading size. It takes its colours from the
+     palette rather than being fixed, so the square inverts with the theme
+     instead of disappearing into a dark page. */
+  .wordmark{
+    display:flex; align-items:center; gap:11px;
+    margin:0 0 20px; font:650 1.125rem/1 var(--body);
+    letter-spacing:-.015em; color:var(--ink);
+  }
+  .wordmark svg{ display:block; width:27px; height:27px; flex:0 0 auto; }
+  .wordmark .g{ fill:var(--ink) }
+  .wordmark .l{ fill:var(--paper) }
+  .wordmark .m{ fill:var(--mark) }
+
   .eyebrow{
     font-family:var(--display); font-style:italic; font-size:1rem;
     color:var(--graphite); letter-spacing:.01em; margin:0 0 18px;
@@ -271,12 +284,21 @@
 <header>
   <div class="wrap">
     <div class="col">
+      <div class="wordmark rise">
+        <svg viewBox="0 0 32 32" aria-hidden="true">
+          <rect class="g" width="32" height="32" rx="7"/>
+          <rect class="l" x="6" y="6.5"  width="20" height="3.4" rx="1.7"/>
+          <rect class="m" x="6" y="14.3" width="20" height="3.4" rx="1.7"/>
+          <rect class="l" x="6" y="22.1" width="20" height="3.4" rx="1.7"/>
+        </svg>
+        <span>Threeline</span>
+      </div>
       <p class="eyebrow rise">for bass players who work songs out by ear</p>
       <h1 class="rise">The whole thing<br>is <span class="mark">three rows</span>.</h1>
       <p class="lede rise" style="margin-top:26px">
         How long the note is, where it sits on the neck, and what it's called,
         one above the other so you can read all three at once. It's how I've
-        always written transcriptions on paper. This does the same, typed.
+        always written transcriptions on paper. Threeline does the same, typed.
       </p>
       <div class="actions rise">
         <a class="btn" href="bass-notation.html">Open the editor</a>
