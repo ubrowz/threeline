@@ -450,6 +450,7 @@ function newNote(o){
     tie:false,            // tied into the following note
     dead:false,           // ghost / muted note, drawn as x
     stac:false,           // staccato — a dot under the head, and played short
+    expr:"",              // a performance direction, written under the staff
     tup:0,                // 0, or 3 for a member of a triplet
     link:null,            // null | "legato" (hammer or pull) | "slide", to the next note
     lyric:"",
@@ -719,6 +720,8 @@ let STEM_TOP      = 21;
 let STAFF_TOP     = 74;
 const STR_GAP     = 15;
 let STAFF_BOT = STAFF_TOP + STR_GAP * (NSTR - 1);
+let EXPR_Y    = STAFF_BOT + 14;
+const EXPR_H  = 17;           // what the row costs, when a section uses it
 let NAME_Y    = STAFF_BOT + 25;
 let LYRIC_Y   = NAME_Y + 19;
 
@@ -740,6 +743,7 @@ function refreshMetrics(){
   TUP_Y     = 5;
   CHORD_Y   = 9;
 
+  EXPR_Y  = STAFF_BOT + 14;                       // only used when something is written
   NAME_Y  = STAFF_BOT + 25;
   LYRIC_Y = showNames() ? NAME_Y + 19 : NAME_Y;   // lyrics take the empty row
 }
@@ -759,6 +763,13 @@ const BASE_W = { w:80, h:62, q:46, e:33, s:26 };
 const MEASURE_PAD_L = 11, MEASURE_PAD_R = 9, MEASURE_MIN_W = 76;
 const REPEAT_W = 14;   // room a |: or :| takes up inside the bar
 const FONT_SIG = "700 15px system-ui,-apple-system,sans-serif";
+// Directions to the player, written under the staff in italic. They are words,
+// not instructions to the editor: none of them changes how anything sounds.
+const DIRECTIONS = [
+  "staccato", "legato", "marcato", "dolce", "simile",
+  "let ring", "palm mute", "slap", "with a pick",
+  "pizz.", "arco", "rit.", "accel.", "ad lib."
+];
 // The numerals are stacked, so the width is set by the wider of the two.
 function sigWidth(sig){
   const t = theSig(sig);
@@ -1042,7 +1053,7 @@ function svgRest(x, dur, dots){
   return g;
 }
 
-function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, showEnds){
+function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, showEnds, showExpr){
   const notes = sec.notes;
 
   // The body keeps its own coordinates and is translated down to leave room for
@@ -1053,9 +1064,12 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
   const voltaBand = showEnds  ? VOLTA_BAND : 0;
   const top = voltaBand + chordBand + tupBand;
 
-  const bodyH = showLyrics ? LYRIC_Y + 8
-              : showNames() ? NAME_Y + 8
-              : Math.max(STAFF_BOT + 12, TIE_Y + 12);   // a tie still hangs below
+  // The direction row is inserted under the staff, so the rows below it move.
+  const drop = showExpr ? EXPR_H : 0;
+  const nameY = NAME_Y + drop, lyricY = LYRIC_Y + drop;
+  const bodyH = showLyrics ? lyricY + 8
+              : showNames() ? nameY + 8
+              : Math.max(STAFF_BOT + 12 + drop, TIE_Y + 12);   // a tie still hangs below
   const H = bodyH + top;
   const selY = top ? 2 - top : 6;
   const selH = (bodyH - 6) - selY;
@@ -1286,9 +1300,16 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
            + `font-size="12.5" font-weight="600" font-family="system-ui,-apple-system,sans-serif" fill="#2a2e35">${t}</text>`;
         // --- note name row (a dead note has no pitch to name) ---
         if (!n.dead && showNames())
-          s += `<text x="${cx}" y="${NAME_Y}" text-anchor="middle" font-size="12.5" font-weight="500" `
+          s += `<text x="${cx}" y="${nameY}" text-anchor="middle" font-size="12.5" font-weight="500" `
              + `font-family="system-ui,-apple-system,sans-serif" fill="#1b1d21">${esc(nameOf(n))}</text>`;
       }
+
+      // --- direction, under the staff ---
+      // Left-aligned rather than centred: printed expression text starts at its
+      // note and runs on, which is what keeps it from stretching the bar.
+      if (showExpr && n.expr)
+        s += `<text x="${cx - 2}" y="${EXPR_Y}" font-size="12" font-style="italic" `
+           + `font-family="system-ui,-apple-system,sans-serif" fill="#33383f">${esc(n.expr)}</text>`;
 
       // --- chord row, above everything ---
       if (showChords && n.chord){
@@ -1298,7 +1319,7 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
 
       // --- lyric row ---
       if (showLyrics && n.lyric){
-        s += `<text x="${cx}" y="${LYRIC_Y}" text-anchor="middle" font-size="12" `
+        s += `<text x="${cx}" y="${lyricY}" text-anchor="middle" font-size="12" `
            + `font-family="system-ui,-apple-system,sans-serif" fill="#33383f">${esc(n.lyric)}</text>`;
       }
 
@@ -1364,6 +1385,7 @@ function render(){
     const showChords = sec.notes.some(n => n.chord);
     const showTups   = sec.notes.some(n => n.tup);
     const showEnds   = sec.notes.some(n => n.ending);
+    const showExpr   = sec.notes.some(n => n.expr);
     const systems = layoutSection(sec);
 
     // A page break sits on the first note of a bar; a bar carrying one always
@@ -1379,7 +1401,7 @@ function render(){
     html += `<input class="sectionhead" data-sechead="${si}" value="${esc(sec.heading)}" placeholder="section name…">`;
     systems.forEach((sys, k) => {
       const brk = k > 0 && opensPage(sys) ? " pagebreak" : "";
-      html += `<div class="system${brk}">${drawSystem(si, sec, sys, showLyrics, showChords, barNo, showTups, showEnds)}</div>`;
+      html += `<div class="system${brk}">${drawSystem(si, sec, sys, showLyrics, showChords, barNo, showTups, showEnds, showExpr)}</div>`;
       barNo += sys.measures.length;
     });
     html += `</div>`;
@@ -1495,6 +1517,15 @@ function renderSidebar(){
       <div class="row"><label>Tie</label>
         <button class="btn ${n.tie?"on":""}" data-tie style="flex:1">${n.tie?"tied to next":"no"}</button>
       </div>`}
+      <div class="row"><label>Direction</label>
+        <select class="fld" data-expr>
+          <option value="" ${n.expr?"":"selected"}>none</option>
+          ${DIRECTIONS.map(d =>
+            `<option value="${esc(d)}" ${n.expr===d?"selected":""}>${esc(d)}</option>`).join("")}
+          ${n.expr && !DIRECTIONS.includes(n.expr)
+            ? `<option value="${esc(n.expr)}" selected>${esc(n.expr)}</option>` : ""}
+        </select>
+      </div>
       <div class="row"><label>Chord</label>
         <input class="fld" data-chord id="chordInput" value="${esc(n.chord)}" placeholder="e.g. F#m">
       </div>
@@ -2945,6 +2976,11 @@ document.querySelector(".sidebar").addEventListener("input", e => {
     return;
   }
   if (d.str !== undefined){ setString(+e.target.value); return; }
+  if (d.expr !== undefined){
+    const n = curNote();
+    if (n){ pushUndo(); n.expr = e.target.value; render(); }
+    return;
+  }
   if (d.fret !== undefined){
     const n = curNote();
     if (n){
