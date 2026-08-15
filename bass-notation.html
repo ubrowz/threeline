@@ -242,14 +242,14 @@
           <span class="muted">follow when playing</span>
         </div>
         <div class="row"><label>Time</label>
-          <select class="fld" id="fTime">
-            <option value="4/4">4/4</option>
-            <option value="3/4">3/4</option>
-            <option value="2/4">2/4</option>
-            <option value="5/4">5/4</option>
-            <option value="6/8">6/8</option>
-            <option value="12/8">12/8</option>
-          </select>
+          <input class="fld" id="fTime" list="sigList" spellcheck="false"
+                 title="The metre from this bar on — any pair, e.g. 7/8 or 31/8">
+          <datalist id="sigList">
+            <option value="4/4"></option><option value="3/4"></option>
+            <option value="2/4"></option><option value="5/4"></option>
+            <option value="7/8"></option><option value="6/8"></option>
+            <option value="12/8"></option>
+          </datalist>
         </div>
         <div class="row"><label>Bass</label>
           <select class="fld" id="fTuning">
@@ -454,6 +454,8 @@ function newNote(o){
     chord:"",             // chord symbol shown above the rhythm row
     spell:null,           // null | "sharp" | "flat"
 
+    sig:null,             // {beats,unit} — the metre changes at this bar
+
     // Bar-level settings. These live on the first note of a bar, but the UI
     // lets you toggle them from any note in it — see barAnchor().
     brk:false,            // start a new line at this bar
@@ -542,8 +544,21 @@ function tupletRuns(notes){
   }
   return runs;
 }
-function measureCapacity(){ return song.timeSig.beats * 4 / song.timeSig.unit; }
-function beamUnit(){ return song.timeSig.unit === 8 ? 1.5 : 1; }
+// A metre is {beats, unit} and any pair works — 7/8 and 31/8 as much as 4/4.
+// It can change from any bar: the new one is kept on that bar's first note,
+// the same place a repeat or a line break lives, and stays in force until the
+// next change, across section boundaries as well.
+function theSig(sig){ return sig || (song && song.timeSig) || { beats:4, unit:4 }; }
+function measureCapacity(sig){ const t = theSig(sig); return t.beats * 4 / t.unit; }
+// Eighth-based metres beam in threes, so 6/8 and 12/8 come out as usual and an
+// odd one like 7/8 as 3+3+1 — not every player's grouping, but readable.
+function beamUnit(sig){ return theSig(sig).unit === 8 ? 1.5 : 1; }
+function sameSig(a, b){ return !!a && !!b && a.beats === b.beats && a.unit === b.unit; }
+function sigText(sig){ const t = theSig(sig); return `${t.beats}/${t.unit}`; }
+function parseSig(text){
+  const m = /^\s*(\d{1,2})\s*[\/: ]\s*(1|2|4|8|16|32)\s*$/.exec(String(text || ""));
+  return m && +m[1] >= 1 ? { beats:+m[1], unit:+m[2] } : null;
+}
 
 function curSection(){ return song.sections[cursor.sec]; }
 function curNotes(){ const s = curSection(); return s ? s.notes : []; }
@@ -741,6 +756,12 @@ let CHORD_Y      = 9;    // baseline, in body coordinates — sits just above th
 const BASE_W = { w:80, h:62, q:46, e:33, s:26 };
 const MEASURE_PAD_L = 11, MEASURE_PAD_R = 9, MEASURE_MIN_W = 76;
 const REPEAT_W = 14;   // room a |: or :| takes up inside the bar
+const FONT_SIG = "700 15px system-ui,-apple-system,sans-serif";
+// The numerals are stacked, so the width is set by the wider of the two.
+function sigWidth(sig){
+  const t = theSig(sig);
+  return Math.max(textW(String(t.beats), FONT_SIG), textW(String(t.unit), FONT_SIG)) + 10;
+}
 
 function stringY(s){ return STAFF_TOP + (NSTR - 1 - s) * STR_GAP; }
 
@@ -758,30 +779,65 @@ function noteWidth(notes, i){
   return w;
 }
 
-function splitMeasures(notes){
-  const cap = measureCapacity();
+function splitMeasures(notes, startSig){
+  let sig = theSig(startSig), cap = measureCapacity(sig), barSig = sig;
   const out = [];
   let cur = [], acc = 0, start = 0;
   for (let i = 0; i < notes.length; i++){
+    if (!cur.length){                       // a change only takes effect at a barline
+      if (notes[i].sig){ sig = notes[i].sig; cap = measureCapacity(sig); }
+      barSig = sig;
+    }
     cur.push(i);
     acc += noteBeats(notes[i]);
-    if (acc >= cap - 1e-9){ out.push({ idx:cur, start }); cur = []; start = i + 1; acc = 0; }
+    if (acc >= cap - 1e-9){
+      out.push({ idx:cur, start, sig:barSig }); cur = []; start = i + 1; acc = 0;
+    }
   }
-  if (cur.length) out.push({ idx:cur, start });
-  if (!out.length) out.push({ idx:[], start:0 });
+  if (cur.length) out.push({ idx:cur, start, sig:barSig });
+  if (!out.length) out.push({ idx:[], start:0, sig });
+  // where the reader needs to be told
+  let shown = theSig(startSig);
+  for (const b of out){ b.showSig = !sameSig(b.sig, shown); shown = b.sig; }
   return out;
+}
+
+// The metre in force when a section starts, which is whatever the sections
+// before it left it as.
+function sigAt(secIdx){
+  let sig = song.timeSig;
+  for (let k = 0; k < secIdx && k < song.sections.length; k++){
+    const sec = song.sections[k];
+    if (sec.ref || !sec.notes.length) continue;
+    const bars = splitMeasures(sec.notes, sig);
+    sig = bars[bars.length - 1].sig;
+  }
+  return sig;
+}
+function measuresOf(sec){
+  return splitMeasures(sec.notes, sigAt(song.sections.indexOf(sec)));
+}
+// The metre the cursor is sitting in, which is what the Time field shows.
+function sigAtCursor(){
+  const sec = curSection();
+  if (!sec) return song.timeSig;
+  const bars = measuresOf(sec);
+  // before the first note the metre is the opening one, not the closing one
+  const bar = bars.find(m => m.idx.indexOf(cursor.i) >= 0)
+           || (cursor.i < 0 ? bars[0] : bars[bars.length - 1]);
+  return (bar || {}).sig || sigAt(cursor.sec);
 }
 
 // Is this note the first one in its bar?
 function isMeasureStart(sec, i){
-  return splitMeasures(sec.notes).some(m => m.idx.length && m.idx[0] === i);
+  return measuresOf(sec).some(m => m.idx.length && m.idx[0] === i);
 }
 
 // Bar-level settings are stored on the bar's first note. Given any note, this
 // returns the note that carries them, so you can toggle a repeat or a line
 // break from wherever the cursor happens to be in the bar.
 function barAnchor(sec, i){
-  for (const m of splitMeasures(sec.notes)) if (m.idx.indexOf(i) >= 0) return m.idx[0];
+  for (const m of measuresOf(sec)) if (m.idx.indexOf(i) >= 0) return m.idx[0];
   return i;
 }
 
@@ -800,11 +856,16 @@ function barsPerLine(){
 function layoutSection(sec){
   refreshMetrics();
   const notes = sec.notes;
-  const measures = splitMeasures(notes).map(m => {
+  const si = song.sections.indexOf(sec);
+  // the song's opening metre is printed even though nothing has changed yet
+  const opensSong = si === song.sections.findIndex(x => !x.ref && x.notes.length);
+  const measures = splitMeasures(notes, sigAt(si)).map((m, bi) => {
     const first = m.idx.length ? m.idx[0] : -1;
     const flags = first >= 0 ? notes[first] : null;
-    // repeat signs need room inside the bar, next to the barline
-    const padL = MEASURE_PAD_L + (flags && flags.repStart ? REPEAT_W : 0);
+    const showSig = m.showSig || (opensSong && bi === 0);
+    const sigW = showSig ? sigWidth(m.sig) : 0;
+    // repeat signs and a metre both need room inside the bar, by the barline
+    const padL = MEASURE_PAD_L + (flags && flags.repStart ? REPEAT_W : 0) + sigW;
     const padR = MEASURE_PAD_R + (flags && flags.repEnd   ? REPEAT_W : 0);
 
     const items = [];
@@ -814,7 +875,8 @@ function layoutSection(sec){
       items.push({ i, x, w });
       x += w;
     }
-    return { items, w: Math.max(MEASURE_MIN_W, x + padR), x: 0, first };
+    return { items, w: Math.max(MEASURE_MIN_W, x + padR), x: 0, first,
+             sig:m.sig, showSig, sigX: padL - sigW / 2 };
   });
 
   const bpl = barsPerLine();
@@ -842,13 +904,19 @@ function layoutSection(sec){
       let scale;
       if (bpl){
         scale = (CONTENT_W / bpl) / m.w;
+      } else if (sys.used <= 0){
+        scale = 1;
+      } else if (si === systems.length - 1){
+        // The last line keeps its natural width — unless it does not fit, which
+        // a long bar in something like 31/8 manages on its own.
+        scale = sys.used > CONTENT_W ? CONTENT_W / sys.used : 1;
       } else {
-        const last = si === systems.length - 1;
-        scale = (!last && sys.used > 0) ? Math.min(CONTENT_W / sys.used, 1.8) : 1;
+        scale = Math.min(CONTENT_W / sys.used, 1.8);
       }
       m.x = x;
       m.w *= scale;
       for (const it of m.items){ it.x *= scale; it.w *= scale; }
+      m.sigX *= scale;
       x += m.w;
     }
     sys.width = x;
@@ -862,7 +930,7 @@ function layoutSection(sec){
 
 // Group beamable notes (eighths & shorter) that share a beat unit.
 function beamGroups(notes, measure){
-  const unit = beamUnit();
+  const unit = beamUnit(measure.sig);
   const groups = [];
   let cur = null, pos = 0;
 
@@ -1008,6 +1076,18 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
     const y = stringY(st);
     s += `<line x1="0" y1="${y}" x2="${sys.width}" y2="${y}" stroke="#9aa0a8" stroke-width="1"/>`;
   }
+  // ---- time signature, where the song opens and wherever it changes ----
+  for (const m of sys.measures){
+    if (!m.showSig) continue;
+    const x = m.x + m.sigX, midY = (STAFF_TOP + STAFF_BOT) / 2;
+    for (const [txt, yy] of [[String(m.sig.beats), midY - 3], [String(m.sig.unit), midY + 15]]){
+      const w = textW(txt, FONT_SIG);
+      s += `<rect x="${x - w/2 - 2}" y="${yy - 12.5}" width="${w + 4}" height="15" fill="#fff"/>`
+         + `<text x="${x}" y="${yy}" text-anchor="middle" font-size="15" font-weight="700" `
+         + `font-family="system-ui,-apple-system,sans-serif" fill="#2a2e35">${txt}</text>`;
+    }
+  }
+
   // Where every note on this line sits. A note not in here is on another line,
   // which is what ties and hammer marks have to cope with.
   const pos = new Map();
@@ -1251,6 +1331,8 @@ function tempoMark(){
 function render(){
   refreshMetrics();
   $("#fOct").disabled = !showNames();   // with no name row, octaves have nothing to show on
+  const tf = $("#fTime");                // the metre shown is the one at the cursor
+  if (tf && document.activeElement !== tf) tf.value = sigText(sigAtCursor());
   const page = $("#page");
   let html = "";
 
@@ -1508,7 +1590,7 @@ function timeline(){
   song.sections.forEach((sec, si) => {
     if (sec.ref || !sec.notes.length) return;
     const ns = sec.notes;
-    const bars = splitMeasures(ns);
+    const bars = splitMeasures(ns, sigAt(si));
     const emit = b => { for (const i of bars[b].idx) out.push({ si, i, n: ns[i] }); };
 
     const headOf = b => (bars[b].idx.length ? ns[bars[b].idx[0]] : null);
@@ -2063,7 +2145,7 @@ function applySketch(text){
   if (!blocks.length || !blocks.some(b => b.bars.length)) return 0;
 
   pushUndo();
-  const cap = measureCapacity();
+  const cap = measureCapacity(sigAt(cursor.sec));
   const unit = DUR[entry.dur] * (2 - Math.pow(0.5, entry.dots));
   const per = Math.max(1, Math.round(cap / unit));
 
@@ -2426,7 +2508,8 @@ function addMeasure(){
   if (isRefSection()) return;
   pushUndo();
   const ns = curNotes();
-  const cap = measureCapacity();
+  const bars = measuresOf(curSection());
+  const cap = measureCapacity(bars[bars.length - 1].sig);   // where the section left off
   const unit = DUR[entry.dur] * (2 - Math.pow(0.5, entry.dots));
   const total = ns.reduce((a, n) => a + noteBeats(n), 0);
   let need = ((cap - (total % cap)) % cap) + cap;
@@ -2446,7 +2529,7 @@ function addMeasure(){
 
 // One bar's worth of rests, using the currently selected note length.
 function barOfRests(){
-  const cap = measureCapacity();
+  const cap = measureCapacity(sigAtCursor());
   const unit = DUR[entry.dur] * (2 - Math.pow(0.5, entry.dots));
   const fill = [];
   let need = cap, guard = 0;
@@ -2463,7 +2546,7 @@ function endOfCurrentBar(){
   const ns = curNotes();
   if (!ns.length) return 0;
   const target = Math.min(cursor.i, ns.length - 1);
-  const bars = splitMeasures(ns);
+  const bars = measuresOf(curSection());
   const bar = bars.find(m => m.idx.indexOf(target) >= 0);
   return bar && bar.idx.length ? bar.idx[bar.idx.length - 1] + 1 : ns.length;
 }
@@ -2511,7 +2594,7 @@ function deleteMeasure(){
   if (!ns.length) return;
 
   const target = Math.min(cursor.i, ns.length - 1);
-  const bars = splitMeasures(ns);
+  const bars = measuresOf(sec);
   const bi = bars.findIndex(m => m.idx.indexOf(target) >= 0);
   if (bi < 0 || !bars[bi].idx.length) return;
 
@@ -2530,6 +2613,7 @@ function deleteMeasure(){
     if (flags.brk) after.brk = true;
     if (flags.pageBrk) after.pageBrk = true;
     if (flags.repStart) after.repStart = true;
+    if (flags.sig && !after.sig) after.sig = flags.sig;
   }
   if (flags.repEnd && bi > 0){
     const prev = ns[bars[bi-1].idx[0]];
@@ -2566,7 +2650,7 @@ function breakAnchor(){
   const sec = curSection();
   const ns = sec ? sec.notes : [];
   if (!ns.length) return null;
-  const bars = splitMeasures(ns);
+  const bars = measuresOf(sec);
   const at = Math.min(cursor.i, ns.length - 1);
   const bi = bars.findIndex(m => m.idx.indexOf(at) >= 0);
   const next = bars[bi + 1];
@@ -2970,12 +3054,38 @@ $("#btnSplitSection").addEventListener("click", splitSection);
 /* ---------- song fields ---------- */
 $("#fTitle").addEventListener("input", e => { pushUndo("title"); song.title = e.target.value; render(); });
 $("#fArtist").addEventListener("input", e => { pushUndo("artist"); song.artist = e.target.value; render(); });
-$("#fTime").addEventListener("change", e => {
-  pushUndo();
-  const [b, u] = e.target.value.split("/").map(Number);
-  song.timeSig = { beats:b, unit:u };
+// The metre applies from the cursor's bar on. In the song's opening bar that
+// is the song's own metre; anywhere else it is a change, kept on that bar's
+// first note — and setting it back to what was already running clears it
+// rather than printing the same numbers twice.
+function applyTimeSig(text){
+  const sig = parseSig(text);
+  const sec = curSection();
+  if (!sig || !sec){ syncFields(); return; }
+
+  const bars = measuresOf(sec);
+  const bi = Math.max(0, bars.findIndex(m => m.idx.indexOf(cursor.i) >= 0));
+  const bar = bars[bi];
+  const opensSong = cursor.sec === song.sections.findIndex(x => !x.ref && x.notes.length);
+
+  if (!bar || !bar.idx.length){
+    // nothing to hang a change on yet, so this can only be the song's metre
+    if (song.sections.some(x => x.notes.length)){ syncFields(); return; }
+    pushUndo();
+    song.timeSig = sig;
+  } else if (opensSong && bi === 0){
+    pushUndo();
+    song.timeSig = sig;
+    sec.notes[bar.idx[0]].sig = null;
+  } else {
+    pushUndo();
+    const running = bi > 0 ? bars[bi-1].sig : sigAt(cursor.sec);
+    sec.notes[bar.idx[0]].sig = sameSig(sig, running) ? null : sig;
+  }
+  syncFields();
   render();
-});
+}
+$("#fTime").addEventListener("change", e => applyTimeSig(e.target.value));
 $("#fOct").addEventListener("change", e => { pushUndo(); song.octaves = e.target.value; render(); });
 $("#fBars").addEventListener("change", e => { pushUndo(); song.barsPerLine = e.target.value; render(); });
 $("#fNaming").addEventListener("change", e => {
@@ -2994,7 +3104,7 @@ $("#fTuning").addEventListener("change", e => {
 function syncFields(){
   $("#fTitle").value  = song.title === "Untitled" ? "" : song.title;
   $("#fArtist").value = song.artist;
-  $("#fTime").value   = `${song.timeSig.beats}/${song.timeSig.unit}`;
+  $("#fTime").value   = sigText(sigAtCursor());
   $("#fBars").value   = song.barsPerLine || "auto";
   $("#fNaming").value = song.naming || "nl";
   const tsel = $("#fTuning");

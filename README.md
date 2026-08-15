@@ -8,7 +8,7 @@ sits on the neck, and what it is called.
 The two files that get served:
 
 - `index.html` — the landing page
-- `bass-notation.html` — the editor itself, 121 KB
+- `bass-notation.html` — the editor itself, 127 KB
 
 The editor is self-contained and works offline. Transcriptions are saved as
 plain `.json` on your own machine; nothing is uploaded anywhere.
