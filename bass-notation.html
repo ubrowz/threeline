@@ -344,6 +344,7 @@
           <div><kbd>r</kbd></div><div>rest</div>
           <div><kbd>x</kbd></div><div>dead / ghost note</div>
           <div><kbd>-</kbd></div><div>hammer / pull → slide → plain</div>
+          <div><kbd>,</kbd></div><div>staccato — the other dot key</div>
           <div><kbd>⇧T</kbd></div><div>split into a triplet, or merge one back</div>
           <div><kbd>t</kbd></div><div>tie to next note</div>
           <div><kbd>n</kbd></div><div>flip sharp ↔ flat spelling</div>
@@ -448,6 +449,7 @@ function newNote(o){
     string:2, fret:0,
     tie:false,            // tied into the following note
     dead:false,           // ghost / muted note, drawn as x
+    stac:false,           // staccato — a dot under the head, and played short
     tup:0,                // 0, or 3 for a member of a triplet
     link:null,            // null | "legato" (hammer or pull) | "slide", to the next note
     lyric:"",
@@ -1214,6 +1216,10 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
         }
         for (let k = 0; k < n.dots; k++)
           s += `<circle cx="${cx + 9.5 + k*4}" cy="${HEAD_Y - 4.5}" r="1.6" fill="#2a2e35"/>`;
+        // Staccato goes under the head, the side the stem is not on — where
+        // printed music puts it, and well clear of the augmentation dot up to
+        // the right.
+        if (n.stac) s += `<circle cx="${cx}" cy="${HEAD_Y + 7.5}" r="1.7" fill="#2a2e35"/>`;
       }
 
       // Where the connector runs to. If the following note is on the next line,
@@ -1225,9 +1231,12 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
                         : carries ? sys.width - 4 : null;
 
       // The other half of a connector that started on the line above.
+      // A slur is drawn outside a staccato dot, never through it.
+      const clearOf = (a, b) => TIE_Y + ((a && a.stac) || (b && b.stac) ? 6 : 0);
+
       const prev = notes[it.i - 1];
       if (prev && !pos.has(it.i - 1) && (prev.tie || prev.link)){
-        const y0 = TIE_Y, from = Math.max(2, cx - 26);
+        const y0 = clearOf(prev, n), from = Math.max(2, cx - 26);
         s += `<path d="M${from},${y0} Q${(from+cx)/2},${y0+8} ${cx},${y0}" `
            + `stroke="#2a2e35" stroke-width="${prev.tie ? 1.15 : 0.95}" fill="none"`
            + (prev.tie ? "" : ` opacity="0.7"`) + `/>`;
@@ -1237,7 +1246,7 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
       if (n.tie){
         const x2 = nextX();
         if (x2 !== null){
-          const y0 = TIE_Y, mid = (cx + x2) / 2;
+          const y0 = clearOf(n, notes[it.i + 1]), mid = (cx + x2) / 2;
           s += `<path d="M${cx},${y0} Q${mid},${y0+9} ${x2},${y0}" stroke="#2a2e35" stroke-width="1.15" fill="none"/>`;
         }
       }
@@ -1260,7 +1269,7 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
                + `font-style="italic" font-family="system-ui,-apple-system,sans-serif" fill="#2a2e35">${letter}</text>`;
           }
           // a slur over the pair, as in printed tab
-          const y0 = TIE_Y, mx = (cx + x2) / 2;
+          const y0 = clearOf(n, link), mx = (cx + x2) / 2;
           if (!n.tie)
             s += `<path d="M${cx},${y0} Q${mx},${y0+8} ${x2},${y0}" stroke="#2a2e35" stroke-width="0.95" `
                + `fill="none" opacity="0.7"/>`;
@@ -1459,6 +1468,11 @@ function renderSidebar(){
         <button class="btn ${n.tup?"on":""}" data-tup style="flex:1"
           title="Split into three, or merge a triplet back (⇧T)"
         >${n.tup ? "part of a triplet" : "split into 3"}</button>
+      </div>
+      <div class="row"><label>Staccato</label>
+        <button class="btn ${n.stac?"on":""}" data-stac style="flex:1"
+          title="A dot under the note, played short (,)"
+        >${n.stac ? "short" : "as written"}</button>
       </div>
       <div class="row"><label>To next</label>
         <div class="grid" style="flex:1">
@@ -1665,8 +1679,12 @@ function buildPlan(fromK, toK){
       // reached by a hammer, pull or slide? then no fresh pluck
       const prev = adjacent(tl, k) ? tl[k-1] : null;
       const via = (prev && !prev.n.rest && !prev.n.dead && !n.dead) ? prev.n.link : null;
+      // Staccato is detached: about half the written length, with a floor so a
+      // fast note still speaks. A tie runs through it, so only the last note of
+      // a tied run can be short.
+      const short = tl[m].n.stac;
       events.push({
-        t, dur: total, midi: midiOf(n), si, i,
+        t, dur: short ? Math.min(total, Math.max(0.06, total * 0.5)) : total, midi: midiOf(n), si, i,
         dead: !!n.dead,
         soft: via === "legato" || via === "slide",
         from: via === "slide" ? midiOf(prev.n) : null
@@ -2394,6 +2412,14 @@ function toggleDead(){
   render();
 }
 
+function toggleStaccato(){
+  const n = curNote();
+  if (!n || n.rest) return;
+  pushUndo();
+  n.stac = !n.stac;
+  render();
+}
+
 // none → hammer/pull → slide → none
 function cycleLink(){
   const n = curNote();
@@ -2816,6 +2842,7 @@ document.addEventListener("keydown", e => {
     case "T":           e.preventDefault(); makeTriplet(); break;
     case "v": case "V": e.preventDefault(); cycleEnding(); break;
     case "-": case "_": e.preventDefault(); cycleLink(); break;
+    case ",": case "<":  e.preventDefault(); toggleStaccato(); break;
     case "t": case "T": e.preventDefault(); toggleTie(); break;
     case "n": case "N": e.preventDefault(); flipSpelling(); break;
     case "m":           e.preventDefault(); addMeasure(); break;
@@ -2989,6 +3016,7 @@ document.querySelector(".sidebar").addEventListener("click", e => {
   if (d.dot !== undefined) return toggleDot();
   if (d.rest !== undefined) return toggleRest();
   if (d.dead !== undefined) return toggleDead();
+  if (d.stac !== undefined) return toggleStaccato();
   if (d.link !== undefined){
     const n = curNote();
     if (n && !n.rest){ pushUndo(); n.link = d.link || null; render(); }
