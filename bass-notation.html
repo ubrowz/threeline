@@ -11,7 +11,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bass Notation Editor</title>
+<title>Threeline</title>
 <style>
   :root{
     --bg:#eceef1;
@@ -123,6 +123,22 @@
     flex:1;min-width:0;border:1px solid var(--line);border-radius:6px;
     padding:4px 7px;background:#fff;
   }
+  /* Hover help. The words live in each element's own title attribute, so they
+     are still there for a screen reader and still work if this script never
+     runs — this only makes them appear sooner and read better than the
+     browser's own tooltip. */
+  .tip{
+    position:fixed; z-index:200; max-width:270px;
+    background:#1b1d21; color:#f2f3f5;
+    font:400 12.5px/1.5 system-ui,-apple-system,sans-serif;
+    padding:8px 11px; border-radius:7px;
+    box-shadow:0 8px 24px rgba(0,0,0,.24);
+    opacity:0; visibility:hidden; pointer-events:none;
+    transition:opacity .12s ease;
+  }
+  .tip.on{ opacity:1; visibility:visible; }
+  @media print{ .tip{ display:none } }
+  @media (prefers-reduced-motion:reduce){ .tip{ transition:none } }
   .fld:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
   textarea.fld{width:100%;resize:vertical;line-height:1.5;font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12.5px}
   .grid{display:flex;gap:5px;flex-wrap:wrap}
@@ -173,6 +189,32 @@
   }
   .statusbar b{color:var(--ink);font-weight:600}
 
+  /* ---------- reading, for a stand ---------- */
+  /* The same things print hides, hidden on screen, and the music enlarged so
+     it can be read from arm's length. */
+  body.reading{ background:#fff }
+  body.reading .topbar,
+  body.reading .sidebar,
+  body.reading .statusbar{ display:none }
+  body.reading .scrollarea{ padding:14px 12px 90px }
+  body.reading .page{
+    box-shadow:none; border-radius:0; padding:10px 24px 40px;
+    zoom:var(--read-zoom,1.4);
+  }
+  body.reading .sectionhead{ border-color:transparent !important }
+  body.reading .system .hit{ pointer-events:none }   /* reading, not editing */
+  body.reading .system .sel{ opacity:.4 }            /* still says where Play starts */
+  .readbar{
+    position:fixed; left:50%; transform:translateX(-50%); bottom:16px; z-index:150;
+    display:none; gap:8px; align-items:center;
+    background:var(--panel); border:1px solid var(--line);
+    border-radius:12px; padding:9px 11px;
+    box-shadow:0 10px 32px rgba(0,0,0,.18);
+  }
+  body.reading .readbar{ display:flex }
+  .readbar .btn{ padding:9px 15px }
+  @media print{ .readbar{ display:none !important } }
+
   /* ---------- print ---------- */
   @media print{
     body{background:#fff}
@@ -193,16 +235,17 @@
 <div class="app">
 
   <div class="topbar">
-    <div class="brand">Bass Notation <span>· editor</span></div>
-    <button class="btn" id="btnNew">New</button>
-    <button class="btn" id="btnOpen">Open…</button>
+    <div class="brand">Threeline</div>
+    <button class="btn" id="btnNew" title="Start again with an empty transcription. Save this one first if you want to keep it.">New</button>
+    <button class="btn" id="btnOpen" title="Open a .json transcription from your own machine">Open…</button>
     <button class="btn primary" id="btnSave" title="Save (⌘S)">Save</button>
     <button class="btn" id="btnSaveAs" title="Save to a new file (⇧⌘S)">Save as…</button>
-    <button class="btn" id="btnPrint">Print / PDF</button>
+    <button class="btn" id="btnFull" title="Hide the editor and show only the music, large enough to read from a stand (f)">Full screen</button>
+    <button class="btn" id="btnPrint" title="Print, or save as a PDF. Only the music is printed — none of the editor.">Print / PDF</button>
     <span style="width:10px"></span>
     <button class="btn" id="btnPlay" title="Play from the selected note, or play the selection (⌘↵)">Play</button>
     <button class="btn" id="btnLoop" title="Repeat what you are playing until you stop (⌘L)">Loop</button>
-    <select class="btn" id="fRate" title="Practice tempo, as a percentage of the song tempo" style="padding:5px 6px">
+    <select class="btn" id="fRateHidden" hidden>
       <option value="100">100%</option>
       <option value="90">90%</option>
       <option value="80">80%</option>
@@ -227,18 +270,18 @@
 
       <div class="card">
         <h3>Song</h3>
-        <div class="row"><label>Title</label><input class="fld" id="fTitle" placeholder="Untitled"></div>
-        <div class="row"><label>Artist</label><input class="fld" id="fArtist" placeholder=""></div>
+        <div class="row"><label>Title</label><input class="fld" id="fTitle" title="Printed at the top of the first page" placeholder="Untitled"></div>
+        <div class="row"><label>Artist</label><input class="fld" id="fArtist" title="Printed under the title" placeholder=""></div>
         <div class="row"><label>Tempo</label>
-          <input class="fld" type="number" id="fTempo" min="30" max="300" step="1" style="flex:0 0 72px">
+          <input class="fld" type="number" id="fTempo" title="Beats per minute, used when the editor plays the line back" min="30" max="300" step="1" style="flex:0 0 72px">
           <span class="muted">bpm</span>
         </div>
         <div class="row"><label>Show tempo</label>
-          <input type="checkbox" id="fShowTempo" style="flex:0 0 auto;margin:0 6px 0 0">
+          <input type="checkbox" id="fShowTempo" title="Write the tempo on the sheet as well, next to a quarter note" style="flex:0 0 auto;margin:0 6px 0 0">
           <span class="muted">on the sheet</span>
         </div>
         <div class="row"><label>Repeats</label>
-          <input type="checkbox" id="fRepeats" style="flex:0 0 auto;margin:0 6px 0 0">
+          <input type="checkbox" id="fRepeats" title="Play the repeats and endings as written. Off plays straight through once." style="flex:0 0 auto;margin:0 6px 0 0">
           <span class="muted">follow when playing</span>
         </div>
         <div class="row"><label>Time</label>
@@ -252,19 +295,19 @@
           </datalist>
         </div>
         <div class="row"><label>Bass</label>
-          <select class="fld" id="fTuning">
+          <select class="fld" id="fTuning" title="How many strings, and how they are tuned. Notes keep their pitch and move to wherever it now lives.">
             <option value="custom" hidden>custom tuning</option>
           </select>
         </div>
         <div class="row"><label>Note names</label>
-          <select class="fld" id="fNaming">
+          <select class="fld" id="fNaming" title="Which language the bottom row is written in — or leave that row out altogether">
             <option value="nl">Dutch — Fis, Cis, Bes</option>
             <option value="en">English — F#, C#, Bb</option>
             <option value="off">no names — leave the row out</option>
           </select>
         </div>
         <div class="row"><label>Bars / line</label>
-          <select class="fld" id="fBars">
+          <select class="fld" id="fBars" title="A fixed number of bars per line, like ruled paper, or as many as fit">
             <option value="auto">auto (fit the width)</option>
             <option value="1">1</option>
             <option value="2">2</option>
@@ -275,7 +318,7 @@
           </select>
         </div>
         <div class="row"><label>Octaves</label>
-          <select class="fld" id="fOct">
+          <select class="fld" id="fOct" title="Which octave numbering the note names carry. Helmholtz writes the low E as E,">
             <option value="off">off</option>
             <option value="spn">scientific — open E = E1</option>
             <option value="yamaha">Yamaha — open E = E0</option>
@@ -288,9 +331,9 @@
 
       <div class="card">
         <h3>Chord sketch</h3>
-        <textarea class="fld" id="fSketch" rows="4" spellcheck="false"
+        <textarea class="fld" id="fSketch" title="The chord progression, one bar per line or separated by |. Several chords in one bar split it between them. [Name] starts a section." rows="4" spellcheck="false"
           placeholder="[Verse] Am | C | G | Dm&#10;[Chorus] F | G | Am | Am"></textarea>
-        <div style="margin-top:8px"><button class="btn" id="btnSketch" style="width:100%">Add these bars</button></div>
+        <div style="margin-top:8px"><button class="btn" id="btnSketch" title="Lay the progression out as empty bars, with the chords in place, ready to type notes over" style="width:100%">Add these bars</button></div>
         <div class="muted" style="margin-top:6px">A bar per line, or per <b>|</b>. Several chords in one bar split it between them. <b>[Name]</b> starts a section. The bars arrive empty — type frets over the rests afterwards.</div>
       </div>
 
@@ -326,6 +369,39 @@
       </div>
 
       <div class="card">
+        <h3>Playing</h3>
+        <div class="row"><label>Speed</label>
+          <select class="fld" id="fRate" title="Play it slower than written, to work a passage up to speed. The click slows with it.">
+            <option value="100">100%</option>
+            <option value="90">90%</option>
+            <option value="80">80%</option>
+            <option value="70">70%</option>
+            <option value="60">60%</option>
+            <option value="50">50%</option>
+            <option value="40">40%</option>
+          </select>
+        </div>
+        <div class="row"><label>Click</label>
+          <input type="checkbox" id="fMetro" style="flex:0 0 auto;margin:0 6px 0 0"
+            title="A click on every beat of the bar, in whatever metre that bar is in (⌘B)">
+          <span class="muted">on every beat</span>
+        </div>
+        <div class="row"><label>Count-in</label>
+          <input type="checkbox" id="fCountIn" style="flex:0 0 auto;margin:0 6px 0 0"
+            title="One bar of clicks before the music starts, in the metre it is about to start in">
+          <span class="muted">one bar first</span>
+        </div>
+        <div class="row"><label>Sound</label>
+          <select class="fld" id="fSound" title="Which bass it sounds like. Where a pickup sits along the string is what changes the tone.">
+            <option value="plain">plain</option>
+            <option value="p">P-style</option>
+            <option value="j">J-style</option>
+          </select>
+        </div>
+        <div class="muted" style="margin-top:7px">Play and Loop are in the bar at the top, or ⌘↵ and ⌘L.</div>
+      </div>
+
+      <div class="card">
         <h3>Keyboard</h3>
         <div class="keys">
           <div><kbd>0</kbd>–<kbd>9</kbd></div><div>fret number</div>
@@ -338,6 +414,8 @@
           <div><kbd>⌘V</kbd></div><div>paste after the selection</div>
           <div><kbd>⌘↵</kbd></div><div>play / stop</div>
           <div><kbd>⌘L</kbd></div><div>loop what you play</div>
+          <div><kbd>⌘B</kbd></div><div>click on the beat</div>
+          <div><kbd>f</kbd></div><div>full screen, for reading off a stand</div>
           <div><kbd>esc</kbd></div><div>stop playing</div>
           <div><kbd>w</kbd><kbd>h</kbd><kbd>q</kbd><kbd>e</kbd><kbd>s</kbd></div><div>whole · half · quarter · eighth · 16th</div>
           <div><kbd>.</kbd></div><div>dot</div>
@@ -366,6 +444,17 @@
       </div>
 
     </div>
+  </div>
+
+  <div class="readbar" id="readbar">
+    <button class="btn" id="rPlay" title="Play from where you left the cursor, or stop (⌘↵)">Play</button>
+    <button class="btn" id="rLoop" title="Keep repeating until you stop (⌘L)">Loop</button>
+    <span style="width:4px"></span>
+    <button class="btn" id="rOut" title="Smaller (−)">−</button>
+    <span class="muted" id="rZoom" style="min-width:46px;text-align:center">140%</span>
+    <button class="btn" id="rIn" title="Bigger (+)">+</button>
+    <span style="width:4px"></span>
+    <button class="btn" id="rExit" title="Back to editing (Esc, or f)">Done</button>
   </div>
 
   <div class="statusbar">
@@ -1376,7 +1465,7 @@ function render(){
   song.sections.forEach((sec, si) => {
     if (sec.ref){
       html += `<div class="section ref${sec.pageBrk ? " pagebreak" : ""}" data-sec="${si}">`
-           +  `<input class="sectionhead" data-sechead="${si}" value="${esc(sec.heading)}" placeholder="e.g. Chorus">`
+           +  `<input class="sectionhead" data-sechead="${si}" value="${esc(sec.heading)}" placeholder="e.g. Chorus" title="Which earlier section this one repeats. Type the same name.">`
            +  `<span class="reftag">name only</span></div>`;
       return;
     }
@@ -1398,7 +1487,7 @@ function render(){
     const sectionBreaks = !!sec.pageBrk || (systems.length > 0 && opensPage(systems[0]));
 
     html += `<div class="section${sectionBreaks ? " pagebreak" : ""}" data-sec="${si}">`;
-    html += `<input class="sectionhead" data-sechead="${si}" value="${esc(sec.heading)}" placeholder="section name…">`;
+    html += `<input class="sectionhead" data-sechead="${si}" value="${esc(sec.heading)}" placeholder="section name…" title="Name this part of the song — Intro, Verse, Chorus. It is printed above the music.">`;
     systems.forEach((sys, k) => {
       const brk = k > 0 && opensPage(sys) ? " pagebreak" : "";
       html += `<div class="system${brk}">${drawSystem(si, sec, sys, showLyrics, showChords, barNo, showTups, showEnds, showExpr)}</div>`;
@@ -1430,7 +1519,7 @@ function renderSidebar(){
   const sl = $("#seclist");
   sl.innerHTML = song.sections.map((s, i) => `
     <div class="secitem ${i===cursor.sec?"active":""}" data-secpick="${i}">
-      <input class="fld" data-sechead2="${i}" value="${esc(s.heading)}" placeholder="section ${i+1}">
+      <input class="fld" data-sechead2="${i}" value="${esc(s.heading)}" placeholder="section ${i+1}" title="Rename this section. Click the row to move the cursor into it.">
       <button class="mini ${s.ref?"on":""}" data-secref="${i}" title="Name only — no notation">R</button>
       <button class="mini" data-secup="${i}" title="Move up">↑</button>
       <button class="mini" data-secdown="${i}" title="Move down">↓</button>
@@ -1463,7 +1552,7 @@ function renderSidebar(){
       <div class="empty" style="margin-bottom:9px">At the end — type a fret number to add a note.</div>
       <div class="row"><label>Length</label><div class="grid" style="flex:1">${durBtns}</div></div>
       <div class="row"><label>String</label>
-        <select class="fld" data-str>${tuning().map((_,i)=>
+        <select class="fld" data-str title="Which string to play it on. The pitch changes with it — use the arrow keys, or click a staff line.">${tuning().map((_,i)=>
           `<option value="${i}" ${entry.string===i?"selected":""}>${esc(stringLabel(i))}</option>`).reverse().join("")}</select>
       </div>
       <div class="row"><label>Dot</label>
@@ -1476,10 +1565,10 @@ function renderSidebar(){
     ins.innerHTML = `
       <div class="row"><label>Length</label><div class="grid" style="flex:1">${durBtns}</div></div>
       <div class="row"><label>Dot</label>
-        <button class="btn ${n.dots?"on":""}" data-dot style="flex:1">${n.dots?"dotted":"none"}</button>
+        <button class="btn ${n.dots?"on":""}" data-dot style="flex:1" title="Half as long again — a dotted quarter lasts three eighths (.)">${n.dots?"dotted":"none"}</button>
       </div>
       <div class="row"><label>Rest</label>
-        <button class="btn ${n.rest?"on":""}" data-rest style="flex:1">${n.rest?"is a rest":"no"}</button>
+        <button class="btn ${n.rest?"on":""}" data-rest style="flex:1" title="Silence for this long, instead of a note (r)">${n.rest?"is a rest":"no"}</button>
       </div>
       ${n.rest ? "" : `
       <div class="row"><label>Dead note</label>
@@ -1498,27 +1587,27 @@ function renderSidebar(){
       </div>
       <div class="row"><label>To next</label>
         <div class="grid" style="flex:1">
-          <button class="btn ${n.link===null?"on":""}" data-link="">plain</button>
+          <button class="btn ${n.link===null?"on":""}" data-link="" title="Pluck the next note normally">plain</button>
           <button class="btn ${n.link==="legato"?"on":""}" data-link="legato" title="Hammer-on or pull-off, chosen by direction">h / p</button>
-          <button class="btn ${n.link==="slide"?"on":""}" data-link="slide">slide</button>
+          <button class="btn ${n.link==="slide"?"on":""}" data-link="slide" title="Slide into the next note without plucking it (-)">slide</button>
         </div>
       </div>`}
       ${n.rest ? "" : `
       <div class="row"><label>String</label>
-        <select class="fld" data-str>${tuning().map((_,i)=>
+        <select class="fld" data-str title="Which string to play it on. The pitch changes with it — use the arrow keys, or click a staff line.">${tuning().map((_,i)=>
           `<option value="${i}" ${n.string===i?"selected":""}>${esc(stringLabel(i))}</option>`).reverse().join("")}</select>
       </div>
       <div class="row"><label>Fret</label>
-        <input class="fld" type="number" min="0" max="24" data-fret value="${n.fret}">
+        <input class="fld" type="number" min="0" max="24" data-fret value="${n.fret}" title="Which fret to stop it at. 0 is the open string.">
       </div>
       <div class="row"><label>Name</label>
-        <button class="btn" data-spell style="flex:1" ${hasAltSpelling(n)?"":"disabled"}>${esc(nameOf(n))}${hasAltSpelling(n)?" ⇄":""}</button>
+        <button class="btn" data-spell style="flex:1" title="Write the same note the other way round — Fis or Ges (n)" ${hasAltSpelling(n)?"":"disabled"}>${esc(nameOf(n))}${hasAltSpelling(n)?" ⇄":""}</button>
       </div>
       <div class="row"><label>Tie</label>
-        <button class="btn ${n.tie?"on":""}" data-tie style="flex:1">${n.tie?"tied to next":"no"}</button>
+        <button class="btn ${n.tie?"on":""}" data-tie style="flex:1" title="Hold this note through the next one rather than playing it again (t)">${n.tie?"tied to next":"no"}</button>
       </div>`}
       <div class="row"><label>Direction</label>
-        <select class="fld" data-expr>
+        <select class="fld" data-expr title="A word to whoever is reading, written in italic under the staff. It changes nothing about the sound.">
           <option value="" ${n.expr?"":"selected"}>none</option>
           ${DIRECTIONS.map(d =>
             `<option value="${esc(d)}" ${n.expr===d?"selected":""}>${esc(d)}</option>`).join("")}
@@ -1527,7 +1616,7 @@ function renderSidebar(){
         </select>
       </div>
       <div class="row"><label>Chord</label>
-        <input class="fld" data-chord id="chordInput" value="${esc(n.chord)}" placeholder="e.g. F#m">
+        <input class="fld" data-chord id="chordInput" value="${esc(n.chord)}" placeholder="e.g. F#m" title="The chord over this note, printed in bold above. Click it on the sheet to see what is in it. (c)">
       </div>
       <div class="row"><label>Lyric</label>
         <input class="fld" data-lyric id="lyricInput" value="${esc(n.lyric)}" placeholder="syllable"
@@ -1562,7 +1651,7 @@ function renderSidebar(){
       <div class="row"><label></label>
         <div class="grid" style="flex:1">
           <button class="btn" data-ins title="Add a slot after this note (a)">Insert after</button>
-          <button class="btn" data-del>Delete note</button>
+          <button class="btn" data-del title="Remove this note and close the gap (⌫)">Delete note</button>
         </div>
       </div>`;
   }
@@ -1605,17 +1694,24 @@ function persist(){
 
 let audioCtx = null, playTimer = null, play = null;
 let loopOn = false, playRate = 1;          // practice settings, not part of the song
+let metroOn = false, countInOn = false;
+let bassSound = "plain";
+let reading = false, readZoom = 1;
 const PREF_KEY = "bass-notation-prefs";
 
 function loadPrefs(){
   try {
     const p = JSON.parse(localStorage.getItem(PREF_KEY) || "{}");
     loopOn = !!p.loop;
+    metroOn = !!p.metro;
+    bassSound = PICKUPS[p.sound] !== undefined ? p.sound : "plain";
+    countInOn = !!p.countIn;
     playRate = Math.max(0.25, Math.min(1, +p.rate || 1));
   } catch(e){}
 }
 function savePrefs(){
-  try { localStorage.setItem(PREF_KEY, JSON.stringify({ loop:loopOn, rate:playRate })); } catch(e){}
+  try { localStorage.setItem(PREF_KEY, JSON.stringify(
+    { loop:loopOn, rate:playRate, metro:metroOn, countIn:countInOn, sound:bassSound })); } catch(e){}
 }
 
 function ac(){
@@ -1776,9 +1872,88 @@ function deadVoice(ctx, when, out){
   src.stop(when + 0.14);
 }
 
+// A short blip, pitched up on the downbeat so you can hear where the bar is.
+// Deliberately quieter than the bass, since it is there to be followed, not
+// listened to.
+function click(ctx, when, down, out){
+  const osc = ctx.createOscillator(), g = ctx.createGain();
+  osc.type = "square";
+  osc.frequency.setValueAtTime(down ? 1750 : 1150, when);
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.exponentialRampToValueAtTime(down ? 0.20 : 0.11, when + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + 0.05);
+  osc.connect(g); g.connect(out);
+  osc.start(when);
+  osc.stop(when + 0.07);
+}
+
 function sound(ctx, when, ev, out){
   if (ev.dead) deadVoice(ctx, when, out);
   else voice(ctx, when, ev.dur, ev.midi, out, ev);
+}
+
+// A pickup cannot hear a harmonic that has a node where the pickup sits, which
+// is the whole reason a bridge pickup sounds thin and a neck one sounds fat.
+// Subtracting the signal from a delayed copy of itself puts the nulls in the
+// same places: for a pickup a fraction `at` of the string's length from the
+// bridge, the delay is at/f and the nulls land on harmonics at 1/at and up.
+//
+// A P has one pickup, further along the string. A J has two, one of them close
+// to the bridge, and their sum is what scoops its low mids out. On top of that
+// each has the resonant lift a real, inductive pickup has — lower and broader
+// on a P, higher and narrower on a J.
+const PICKUPS = {
+  plain: null,
+  // one pickup, well along the string, and a broad lift low down: round, with
+  // the top rolled off early
+  p: { at: [0.21],
+       eq: [{ f: 600, gain: 4, q: 0.8 }],
+       top: 2400, level: 0.62 },
+  // two pickups, one of them near the bridge. Their sum thins the low mids out
+  // and the growl sits an octave above where the P's warmth does
+  j: { at: [0.25, 0.11],
+       eq: [{ f: 480, gain: -4, q: 1.0 }, { f: 1700, gain: 5, q: 1.1 }],
+       top: 6000, level: 0.90 }
+};
+
+// Builds the chain into `dest` and hands back the node to feed.
+function pickup(ctx, f, dest){
+  const spec = PICKUPS[bassSound];
+  if (!spec) return dest;
+
+  const inN = ctx.createGain();
+  const sum = ctx.createGain();
+  sum.gain.value = spec.level / spec.at.length;
+
+  for (const at of spec.at){
+    const branch = ctx.createGain();
+    const d = ctx.createDelay(0.05);
+    d.delayTime.value = Math.min(0.049, at / Math.max(20, f));
+    const neg = ctx.createGain();
+    neg.gain.value = -1;
+    inN.connect(branch);                                    // the string as it is
+    inN.connect(d); d.connect(neg); neg.connect(branch);    // minus its echo
+    branch.connect(sum);
+  }
+
+  let node = sum;
+  for (const band of spec.eq){                              // the pickup's voicing
+    const eq = ctx.createBiquadFilter();
+    eq.type = "peaking";
+    eq.frequency.value = band.f;
+    eq.Q.value = band.q;
+    eq.gain.value = band.gain;
+    node.connect(eq);
+    node = eq;
+  }
+
+  const top = ctx.createBiquadFilter();                     // and its rolloff
+  top.type = "lowpass";
+  top.frequency.value = spec.top;
+  top.Q.value = 0.7;
+
+  node.connect(top); top.connect(dest);
+  return inN;
 }
 
 function voice(ctx, when, dur, midi, out, art){
@@ -1804,13 +1979,78 @@ function voice(ctx, when, dur, midi, out, art){
   g.gain.exponentialRampToValueAtTime(peak, when + (art && art.soft ? 0.018 : 0.006));
   g.gain.exponentialRampToValueAtTime(0.0001, when + len);
 
-  osc.connect(lp); lp.connect(g); g.connect(out);
+  osc.connect(lp); lp.connect(pickup(ctx, f, g)); g.connect(out);
   osc.start(when);
   osc.stop(when + len + 0.05);
 }
 
 // How much of the view is kept clear below the line being played, so there is
 // always something to read ahead into. Fraction of the visible height.
+// Where the clicks go over a played range. The beat is whatever the bar's own
+// metre says: a quarter in 4/4, a dotted quarter in 6/8 — the same unit the
+// beams are grouped by, so the click agrees with what is on the page. A range
+// that starts mid-bar still clicks on the real beats, not from wherever it
+// happened to begin.
+function beatTrack(fromK, toK, total){
+  const tl = timeline();
+  if (!tl.length) return [];
+  const spb = 60 / ((song.tempo || 90) * playRate);
+  const cache = new Map();
+  const barsOf = si => {
+    if (!cache.has(si)) cache.set(si, measuresOf(song.sections[si]));
+    return cache.get(si);
+  };
+  const barFor = e => barsOf(e.si).find(m => m.idx.indexOf(e.i) >= 0) || null;
+
+  const out = [];
+  let bar = null, barT = 0, t = 0;
+  const emit = () => {
+    if (!bar) return;
+    const cap = measureCapacity(bar.sig), step = beamUnit(bar.sig);
+    for (let b = 0; b < cap - 1e-9; b += step)
+      out.push({ t: barT + b * spb, down: b === 0 });
+  };
+
+  // the first bar may be joined part way through, so back-date its downbeat
+  const first = tl[fromK];
+  if (first){
+    bar = barFor(first);
+    let into = 0;
+    if (bar){
+      const ns = song.sections[first.si].notes;
+      for (const idx of bar.idx){ if (idx === first.i) break; into += noteBeats(ns[idx]); }
+    }
+    barT = -into * spb;
+  }
+
+  for (let k = fromK; k <= toK && k < tl.length; k++){
+    const e = tl[k];
+    const here = barFor(e);
+    if (here && here.idx[0] === e.i && k !== fromK){   // a new bar opens
+      emit();
+      bar = here; barT = t;
+    }
+    t += noteBeats(e.n) * spb;
+  }
+  emit();
+  return out.filter(c => c.t > -1e-6 && c.t < total - 1e-6)
+            .sort((a, b) => a.t - b.t);
+}
+
+// One bar of clicks before the music, in the metre it is about to start in.
+function countIn(fromK){
+  const tl = timeline();
+  const e = tl[fromK];
+  if (!e) return null;
+  const spb = 60 / ((song.tempo || 90) * playRate);
+  const bar = measuresOf(song.sections[e.si]).find(m => m.idx.indexOf(e.i) >= 0);
+  const sig = bar ? bar.sig : song.timeSig;
+  const cap = measureCapacity(sig), step = beamUnit(sig);
+  const clicks = [];
+  for (let b = 0; b < cap - 1e-9; b += step) clicks.push({ t: b * spb, down: b === 0 });
+  return { clicks, dur: cap * spb };
+}
+
 const LOOKAHEAD = 0.42;
 const PLAY_LINE = 0.24;      // where a line lands after a turn, from the top
 
@@ -1896,8 +2136,17 @@ function startPlayback(){
   master.gain.setValueAtTime(1, ctx.currentTime);
   master.connect(ctx.destination);
 
-  play = { ctx, master, plan, t0: ctx.currentTime + 0.12,
-           sched: { k: 0, cycle: 0 }, shown: -1, shownCycle: -1 };
+  // The count-in sits before the music rather than inside it, so the plan,
+  // the loop and the playhead all still start at zero.
+  const lead = countInOn ? countIn(range[0]) : null;
+  const t0 = ctx.currentTime + 0.12 + (lead ? lead.dur : 0);
+  if (lead)
+    for (const c of lead.clicks) click(ctx, t0 - lead.dur + c.t, c.down, master);
+
+  play = { ctx, master, plan, t0,
+           clicks: metroOn ? beatTrack(range[0], range[1], plan.total) : [],
+           sched: { k: 0, cycle: 0 }, clickSched: { k: 0, cycle: 0 },
+           shown: -1, shownCycle: -1 };
   playTimer = setInterval(pump, 25);
   requestAnimationFrame(followPlayhead);
   updateTransport();
@@ -1911,6 +2160,12 @@ function pump(){
   const now = st.ctx.currentTime;
   for (const { when, ev } of windowEvents(st.plan, st.t0, st.sched, now, now + 0.2, loopOn))
     sound(st.ctx, when, ev, st.master);
+
+  // the beat track loops with the music, but the count-in never repeats
+  if (st.clicks.length)
+    for (const { when, ev } of windowEvents({ events: st.clicks, total: st.plan.total },
+                                            st.t0, st.clickSched, now, now + 0.2, loopOn))
+      click(st.ctx, when, ev.down, st.master);
 
   if (!loopOn && st.sched.k >= st.plan.events.length &&
       now > st.t0 + st.plan.total + 0.2) stopPlayback();
@@ -1956,6 +2211,82 @@ function setRate(r){
   updateTransport();
 }
 
+// Reading mode: everything but the music goes, and the music grows. The
+// browser's own chrome goes too where it is allowed — but the mode does not
+// depend on that, so it still works if fullscreen is refused.
+function setReadZoom(z){
+  readZoom = Math.max(0.4, Math.min(3, Math.round(z * 20) / 20));   // low enough to fit a small window
+  document.documentElement.style.setProperty("--read-zoom", readZoom);
+  const l = $("#rZoom");
+  if (l) l.textContent = Math.round(readZoom * 100) + "%";
+}
+
+// As big as the window will take, so it looks right on a laptop and on a
+// tablet without anyone having to think about it. Adjust from there with + and
+// −, which lasts until you leave. Measured after the sidebar has gone, or the
+// music would be fitted to a width that no longer exists.
+function fitReading(){
+  const page = $("#page");
+  if (!page) return;
+  // Measured against the window rather than the scroll area, because the area's
+  // own width moves depending on whether the current zoom has put a scrollbar
+  // on it — which is exactly what we are about to change. Nothing else is on
+  // screen in reading mode, so the window is the room available. The page's own
+  // width comes from its style, since zoom is baked into anything measured.
+  const natural = parseFloat(getComputedStyle(page).width);
+  setReadZoom(natural ? (innerWidth - 44) / natural : 1.4);
+}
+
+function enterReading(){
+  if (reading) return;
+  reading = true;
+  document.body.classList.add("reading");
+  fitReading();
+  updateTransport();
+  const el = document.documentElement;
+  if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+}
+
+function leaveReading(){
+  if (!reading) return;
+  reading = false;
+  document.body.classList.remove("reading");
+  if (document.fullscreenElement && document.exitFullscreen)
+    document.exitFullscreen().catch(() => {});
+  updateTransport();
+}
+
+function toggleReading(){ reading ? leaveReading() : enterReading(); }
+
+// Leaving fullscreen by any route — Esc, the browser's own button — leaves
+// reading mode with it, so the two never disagree.
+// Turning a tablet, or dragging the window, re-fits it.
+window.addEventListener("resize", () => { if (reading) fitReading(); });
+
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement && reading) leaveReading();
+});
+
+function setSound(v){
+  bassSound = PICKUPS[v] !== undefined ? v : "plain";
+  savePrefs();
+  updateTransport();          // the next note played picks it up
+}
+
+function setMetro(on){
+  metroOn = !!on;
+  savePrefs();
+  if (isPlaying()) startPlayback();     // pick the clicks up straight away
+  updateTransport();
+}
+function toggleMetro(){ setMetro(!metroOn); }
+
+function setCountIn(on){
+  countInOn = !!on;
+  savePrefs();
+  updateTransport();                    // takes effect the next time you press play
+}
+
 function toggleLoop(){
   loopOn = !loopOn;
   savePrefs();
@@ -1970,8 +2301,21 @@ function updateTransport(){
   b.classList.toggle("primary", isPlaying());
   const l = $("#btnLoop");
   if (l) l.classList.toggle("on", loopOn);
+  const m = $("#fMetro");
+  if (m) m.checked = metroOn;
+  const c = $("#fCountIn");
+  if (c) c.checked = countInOn;
   const r = $("#fRate");
   if (r) r.value = String(Math.round(playRate * 100));
+  const so = $("#fSound");
+  if (so) so.value = bassSound;
+  const rp = $("#rPlay");
+  if (rp){
+    rp.textContent = isPlaying() ? "Stop" : "Play";
+    rp.classList.toggle("primary", isPlaying());
+  }
+  const rl = $("#rLoop");
+  if (rl) rl.classList.toggle("on", loopOn);
 }
 
 
@@ -2787,9 +3131,20 @@ document.addEventListener("keydown", e => {
   const k = e.key;
 
   if ((e.metaKey || e.ctrlKey) && k === "Enter"){ e.preventDefault(); togglePlayback(); return; }
+  if ((e.metaKey || e.ctrlKey) && (k === "b" || k === "B")){ e.preventDefault(); toggleMetro(); return; }
 
   // Inside a text box these belong to the browser, so only claim them on the score.
   if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === "l"){ e.preventDefault(); toggleLoop(); return; }
+
+  // Reading is for playing along, so nothing that edits is reachable from the
+  // keyboard while it is up.
+  if (reading){
+    if (k === "Escape"){ e.preventDefault(); isPlaying() ? stopPlayback() : leaveReading(); return; }
+    if (k === "f" || k === "F"){ e.preventDefault(); leaveReading(); return; }
+    if (k === "+" || k === "="){ e.preventDefault(); setReadZoom(readZoom + 0.1); return; }
+    if (k === "-" || k === "_"){ e.preventDefault(); setReadZoom(readZoom - 0.1); return; }
+    return;
+  }
 
   if ((e.metaKey || e.ctrlKey) && !inField(document.activeElement)){
     const c = k.toLowerCase();
@@ -2879,6 +3234,7 @@ document.addEventListener("keydown", e => {
     case "m":           e.preventDefault(); addMeasure(); break;
     case "M":           e.preventDefault(); deleteMeasure(); break;
     case "i": case "I": e.preventDefault(); insertMeasure(); break;
+    case "f": case "F":  e.preventDefault(); toggleReading(); break;
     case "p": case "P": e.preventDefault(); togglePageBreak(); break;
     case "S":           e.preventDefault(); splitSection(); break;
     case "[":           e.preventDefault(); toggleRepeat("repStart"); break;
@@ -3399,7 +3755,64 @@ $("#fileInput").addEventListener("change", e => {
 $("#btnSave").addEventListener("click", () => saveFile(false));
 $("#btnSaveAs").addEventListener("click", () => saveFile(true));
 $("#btnPrint").addEventListener("click", () => { stopPlayback(); window.print(); });
+// The browser's own tooltip takes about a second and cannot be read at a
+// glance. This shows the same text sooner, holding the title off the element
+// while it is up so the native one does not appear underneath.
+(function hoverHelp(){
+  const tip = document.createElement("div");
+  tip.className = "tip";
+  document.body.appendChild(tip);
+  let timer = null, held = null;
+
+  function drop(){
+    clearTimeout(timer);
+    tip.classList.remove("on");
+    if (held){
+      if (held.isConnected && held.__tip) held.title = held.__tip;
+      held = null;
+    }
+  }
+  function place(el){
+    if (!el.isConnected) return drop();
+    tip.textContent = el.__tip;
+    tip.style.left = "0px"; tip.style.top = "0px";
+    tip.classList.add("on");
+    const r = el.getBoundingClientRect(), t = tip.getBoundingClientRect();
+    let x = r.left + r.width / 2 - t.width / 2;
+    x = Math.max(8, Math.min(x, innerWidth - t.width - 8));
+    let y = r.bottom + 8;
+    if (y + t.height > innerHeight - 8) y = Math.max(8, r.top - t.height - 8);
+    tip.style.left = Math.round(x) + "px";
+    tip.style.top  = Math.round(y) + "px";
+  }
+  document.addEventListener("mouseover", e => {
+    const el = e.target.closest("[title]");
+    if (!el || el === held) return;
+    drop();
+    held = el;
+    held.__tip = el.title;
+    el.title = "";                     // so the browser does not draw its own too
+    timer = setTimeout(() => place(el), 280);
+  });
+  document.addEventListener("mouseout", e => {
+    if (held && !held.contains(e.relatedTarget)) drop();
+  });
+  document.addEventListener("mousedown", drop);
+  document.addEventListener("keydown", drop);
+  window.addEventListener("scroll", drop, true);
+  window.addEventListener("blur", drop);
+})();
+
 $("#btnPlay").addEventListener("click", togglePlayback);
+$("#btnFull").addEventListener("click", toggleReading);
+$("#rExit").addEventListener("click", leaveReading);
+$("#rPlay").addEventListener("click", togglePlayback);
+$("#rLoop").addEventListener("click", toggleLoop);
+$("#rIn").addEventListener("click", () => setReadZoom(readZoom + 0.1));
+$("#rOut").addEventListener("click", () => setReadZoom(readZoom - 0.1));
+$("#fMetro").addEventListener("change", e => setMetro(e.target.checked));
+$("#fSound").addEventListener("change", e => setSound(e.target.value));
+$("#fCountIn").addEventListener("change", e => setCountIn(e.target.checked));
 $("#btnLoop").addEventListener("click", toggleLoop);
 $("#fRate").addEventListener("change", e => setRate(+e.target.value / 100));
 $("#fShowTempo").addEventListener("change", e => {
