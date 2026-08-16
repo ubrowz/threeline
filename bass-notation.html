@@ -402,6 +402,10 @@
             <option value="j">J-style</option>
           </select>
         </div>
+        <div class="row"><label>Covers</label>
+          <span class="muted" id="loopScope" style="flex:1"
+            title="What Play and Loop will go through. With nothing selected they run from the cursor to the end of the piece.">—</span>
+        </div>
         <div class="muted" style="margin-top:7px">Play and Loop are in the bar at the top, or ⌘↵ and ⌘L.</div>
       </div>
 
@@ -1503,6 +1507,7 @@ function render(){
   page.innerHTML = html;
   renderSidebar();
   renderStatus();
+  updateTransport();     // the loop readout follows the cursor and the selection
   persist();
 }
 
@@ -1826,6 +1831,38 @@ function buildPlan(fromK, toK){
   return { events, steps, total: t };
 }
 
+// Which printed bar a note falls in, counting on across sections the way the
+// numbers on the page do.
+function barNumberOf(secIdx, noteIdx){
+  let no = 1;
+  for (let s = 0; s < song.sections.length; s++){
+    const sec = song.sections[s];
+    if (sec.ref) continue;
+    const bars = measuresOf(sec);
+    if (s === secIdx){
+      const k = bars.findIndex(m => m.idx.indexOf(noteIdx) >= 0);
+      return no + (k < 0 ? 0 : k);
+    }
+    no += bars.length;
+  }
+  return no;
+}
+
+// What Play and Loop will actually cover, in words, so it never has to be
+// guessed at from the highlighting.
+function loopScope(){
+  const tl = timeline();
+  const r = tl.length ? playRange() : null;
+  if (!r) return "nothing to play yet";
+  const first = tl[r[0]], last = tl[r[1]];
+  const a = barNumberOf(first.si, first.i), b = barNumberOf(last.si, last.i);
+  const bars = a === b ? `bar ${a}` : `bars ${a}–${b}`;
+  const notes = r[1] - r[0] + 1;
+  return selRange()
+    ? `${notes} note${notes === 1 ? "" : "s"} · ${bars}`
+    : `${bars}, to the end — select notes to loop just those`;
+}
+
 // A selection plays alone; otherwise play from the cursor to the end.
 function playRange(){
   const tl = timeline();
@@ -1836,9 +1873,15 @@ function playRange(){
   if (r){
     const inSel = e => e.si === r.sec && e.i >= r.from && e.i <= r.to;
     const a = tl.findIndex(inSel);
-    let b = -1;
-    for (let k = tl.length - 1; k >= 0; k--) if (inSel(tl[k])){ b = k; break; }
-    if (a >= 0 && b >= a) return [a, b];
+    if (a >= 0){
+      // The first unbroken run, not the first and last time a selected note
+      // appears. With repeats expanded a note shows up once per pass, and
+      // taking the outermost pair swept in everything between them — two
+      // selected notes could loop half the song.
+      let b = a;
+      while (b + 1 < tl.length && inSel(tl[b + 1])) b++;
+      return [a, b];
+    }
   }
   const ns = curNotes();
   const start = ns.length ? at(cursor.sec, Math.min(cursor.i, ns.length - 1)) : -1;
@@ -2320,6 +2363,8 @@ function updateTransport(){
   }
   const rl = $("#rLoop");
   if (rl) rl.classList.toggle("on", loopOn);
+  const sc = $("#loopScope");
+  if (sc) sc.textContent = loopScope();
 }
 
 
