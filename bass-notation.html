@@ -109,6 +109,17 @@
   .system .hit.playing{fill:rgba(47,111,208,.20)}
   @media print{ .system .hit.playing{fill:transparent} }
   .system .hitstr:hover{fill:rgba(47,111,208,.14)}
+  /* ---------- practice: the music is locked ---------- */
+  body.practice .system .hitstr{ pointer-events:none }
+  body.practice .card--edit{ display:none }
+  body.practice .secitem .mini{ display:none }   /* rename, reorder, delete */
+  body.practice .sectionhead{ border-color:transparent; cursor:default }
+  body.practice .locked{ display:flex }
+  .locked{
+    display:none; align-items:center; gap:8px;
+    border:1px dashed var(--line); border-radius:9px;
+    padding:10px 11px; margin-bottom:12px; color:var(--ink-2); font-size:12.5px;
+  }
 
   /* ---------- sidebar ---------- */
   .sidebar{
@@ -244,6 +255,7 @@
     <button class="btn" id="btnOpen" title="Open a .json transcription from your own machine">Open…</button>
     <button class="btn primary" id="btnSave" title="Save (⌘S)">Save</button>
     <button class="btn" id="btnSaveAs" title="Save to a new file (⇧⌘S)">Save as…</button>
+    <button class="btn" id="btnPractice" title="Lock the music so it cannot be changed by accident while you play along. Moving about, choosing what to loop and playing all still work. (⇧P)">Practice</button>
     <button class="btn" id="btnFull" title="Hide the editor and show only the music, large enough to read from a stand (f)">Full screen</button>
     <button class="btn" id="btnPrint" title="Print, or save as a PDF. Only the music is printed — none of the editor.">Print / PDF</button>
     <span style="width:10px"></span>
@@ -271,6 +283,10 @@
     </div>
 
     <div class="sidebar">
+
+      <div class="locked">
+        <b>Practice</b> — the music is locked. Move about, select what to loop, play.
+      </div>
 
       <div class="card">
         <h3>Song</h3>
@@ -333,7 +349,7 @@
         <div class="muted" id="octHint" style="margin-top:6px"></div>
       </div>
 
-      <div class="card">
+      <div class="card card--edit">
         <h3>Chord sketch</h3>
         <textarea class="fld" id="fSketch" title="The chord progression, one bar per line or separated by |. Several chords in one bar split it between them. [Name] starts a section." rows="4" spellcheck="false"
           placeholder="[Verse] Am | C | G | Dm&#10;[Chorus] F | G | Am | Am"></textarea>
@@ -341,17 +357,17 @@
         <div class="muted" style="margin-top:6px">A bar per line, or per <b>|</b>. Several chords in one bar split it between them. <b>[Name]</b> starts a section. The bars arrive empty — type frets over the rests afterwards.</div>
       </div>
 
-      <div class="card">
+      <div class="card card--edit">
         <h3>Note</h3>
         <div id="inspector"></div>
       </div>
 
-      <div class="card">
+      <div class="card card--edit">
         <h3>Chord tones</h3>
         <div id="chordPanel"></div>
       </div>
 
-      <div class="card">
+      <div class="card card--edit">
         <h3>Bar</h3>
         <div class="grid">
           <button class="btn" id="btnInsMeasure" title="Insert an empty bar after this one (i)">Insert</button>
@@ -364,7 +380,7 @@
       <div class="card">
         <h3>Sections</h3>
         <div class="seclist" id="seclist"></div>
-        <div class="grid" style="margin-top:8px">
+        <div class="grid card--edit" style="margin-top:8px">
           <button class="btn" id="btnSplitSection" title="Start a new section after the selected note (⇧S)">Split here</button>
           <button class="btn" id="btnAddSection" title="Add an empty section at the end">+ Section</button>
           <button class="btn" id="btnAddRef" title="Add a name-only section, for a part that repeats">+ Reference</button>
@@ -424,6 +440,7 @@
           <div><kbd>⌘L</kbd></div><div>loop what you play</div>
           <div><kbd>⌘B</kbd></div><div>click on the beat</div>
           <div><kbd>f</kbd></div><div>full screen, for reading off a stand</div>
+          <div><kbd>⇧P</kbd></div><div>practice mode — lock the music</div>
           <div><kbd>esc</kbd></div><div>stop playing</div>
           <div><kbd>w</kbd><kbd>h</kbd><kbd>q</kbd><kbd>e</kbd><kbd>s</kbd></div><div>whole · half · quarter · eighth · 16th</div>
           <div><kbd>.</kbd></div><div>dot</div>
@@ -1495,7 +1512,9 @@ function render(){
     const sectionBreaks = !!sec.pageBrk || (systems.length > 0 && opensPage(systems[0]));
 
     html += `<div class="section${sectionBreaks ? " pagebreak" : ""}" data-sec="${si}">`;
-    html += `<input class="sectionhead" data-sechead="${si}" value="${esc(sec.heading)}" placeholder="section name…" title="Name this part of the song — Intro, Verse, Chorus. It is printed above the music.">`;
+    html += `<input class="sectionhead" data-sechead="${si}" value="${esc(sec.heading)}" placeholder="section name…" `
+      + `${practice ? "readonly " : ""}`
+      + `title="Name this part of the song — Intro, Verse, Chorus. It is printed above the music.">`;
     systems.forEach((sys, k) => {
       const brk = k > 0 && opensPage(sys) ? " pagebreak" : "";
       html += `<div class="system${brk}">${drawSystem(si, sec, sys, showLyrics, showChords, barNo, showTups, showEnds, showExpr)}</div>`;
@@ -1528,7 +1547,8 @@ function renderSidebar(){
   const sl = $("#seclist");
   sl.innerHTML = song.sections.map((s, i) => `
     <div class="secitem ${i===cursor.sec?"active":""}" data-secpick="${i}">
-      <input class="fld" data-sechead2="${i}" value="${esc(s.heading)}" placeholder="section ${i+1}" title="Rename this section. Click the row to move the cursor into it.">
+      <input class="fld" data-sechead2="${i}" value="${esc(s.heading)}" placeholder="section ${i+1}"
+        ${practice ? "readonly" : ""} title="Rename this section. Click the row to move the cursor into it.">
       <button class="mini ${s.ref?"on":""}" data-secref="${i}" title="Name only — no notation">R</button>
       <button class="mini" data-secup="${i}" title="Move up">↑</button>
       <button class="mini" data-secdown="${i}" title="Move down">↓</button>
@@ -1706,6 +1726,7 @@ let loopOn = false, playRate = 1;          // practice settings, not part of the
 let metroOn = false, countInOn = false;
 let bassSound = "plain";
 let reading = false, readZoom = 1;
+let practice = false;      // the music is fixed; only moving about and playing
 const PREF_KEY = "bass-notation-prefs";
 
 function loadPrefs(){
@@ -2303,7 +2324,29 @@ function leaveReading(){
   updateTransport();
 }
 
+// Move the cursor, or stretch the selection, staying inside this section.
+function stepCursor(d, extend){
+  if (!extend) return moveCursor(d);
+  const ns = curNotes();
+  if (!ns.length) return;
+  if (selAnchor === null) selAnchor = Math.min(cursor.i, ns.length - 1);
+  cursor.i = Math.max(0, Math.min(cursor.i + d, ns.length - 1));
+  render();
+}
+
 function toggleReading(){ reading ? leaveReading() : enterReading(); }
+
+// Practice locks the music. Everything that only looks or listens stays: moving
+// the cursor, selecting what to loop, playing. Everything that writes goes,
+// including the string lines on the staff, which is the one that catches you
+// out — you put the cursor on a line and the note moves to it.
+function setPractice(on){
+  practice = !!on;
+  document.body.classList.toggle("practice", practice);
+  render();
+  updateTransport();
+}
+function togglePractice(){ setPractice(!practice); }
 
 // Leaving fullscreen by any route — Esc, the browser's own button — leaves
 // reading mode with it, so the two never disagree.
@@ -2365,6 +2408,11 @@ function updateTransport(){
   if (rl) rl.classList.toggle("on", loopOn);
   const sc = $("#loopScope");
   if (sc) sc.textContent = loopScope();
+  const pb = $("#btnPractice");
+  if (pb){
+    pb.classList.toggle("on", practice);
+    pb.textContent = practice ? "Practising" : "Practice";
+  }
 }
 
 
@@ -3195,6 +3243,36 @@ document.addEventListener("keydown", e => {
     return;
   }
 
+  // Practice: only what looks, listens or chooses. ⌘↵, ⌘L and ⌘B are handled
+  // above and stay, since they play rather than write.
+  if (practice){
+    if (inField(document.activeElement)){
+      if (k === "Escape") document.activeElement.blur();
+      return;
+    }
+    if (e.metaKey || e.ctrlKey){
+      const c = k.toLowerCase();
+      if (c === "a"){ e.preventDefault(); selectSection(); return; }
+      if (c === "c"){ e.preventDefault(); copySelection(); return; }
+      if (c === "s"){ e.preventDefault(); saveFile(e.shiftKey); return; }
+      return;                                   // paste, cut and undo all write
+    }
+    if (e.altKey) return;
+    if (k === "Escape"){
+      e.preventDefault();
+      if (isPlaying()) stopPlayback();
+      else if (selAnchor !== null){ selAnchor = null; render(); }
+      return;
+    }
+    if (k === "P"){ e.preventDefault(); togglePractice(); return; }
+    if (k === "f" || k === "F"){ e.preventDefault(); toggleReading(); return; }
+    if (k === "ArrowLeft" || k === "ArrowRight"){
+      e.preventDefault(); stepCursor(k === "ArrowRight" ? 1 : -1, e.shiftKey); return;
+    }
+    if (k === " "){ e.preventDefault(); moveCursor(+1); return; }
+    return;                                     // everything else writes
+  }
+
   if ((e.metaKey || e.ctrlKey) && !inField(document.activeElement)){
     const c = k.toLowerCase();
     if (c === "a"){ e.preventDefault(); selectSection(); return; }
@@ -3251,22 +3329,10 @@ document.addEventListener("keydown", e => {
     case "ArrowUp":    e.preventDefault(); nudgeString(+1); break;
     case "ArrowDown":  e.preventDefault(); nudgeString(-1); break;
     case "ArrowRight":
-    case "ArrowLeft": {
+    case "ArrowLeft":
       e.preventDefault();
-      const d = k === "ArrowRight" ? 1 : -1;
-      if (e.shiftKey){
-        // extend the selection, staying inside this section
-        const ns = curNotes();
-        if (ns.length){
-          if (selAnchor === null) selAnchor = Math.min(cursor.i, ns.length - 1);
-          cursor.i = Math.max(0, Math.min(cursor.i + d, ns.length - 1));
-          render();
-        }
-      } else {
-        moveCursor(d);
-      }
+      stepCursor(k === "ArrowRight" ? 1 : -1, e.shiftKey);
       break;
-    }
     case " ":          e.preventDefault(); moveCursor(+1); break;
     case "Backspace":
     case "Delete":     e.preventDefault(); deleteNote(); break;
@@ -3284,7 +3350,8 @@ document.addEventListener("keydown", e => {
     case "M":           e.preventDefault(); deleteMeasure(); break;
     case "i": case "I": e.preventDefault(); insertMeasure(); break;
     case "f": case "F":  e.preventDefault(); toggleReading(); break;
-    case "p": case "P": e.preventDefault(); togglePageBreak(); break;
+    case "P":            e.preventDefault(); togglePractice(); break;
+    case "p":            e.preventDefault(); togglePageBreak(); break;
     case "S":           e.preventDefault(); splitSection(); break;
     case "[":           e.preventDefault(); toggleRepeat("repStart"); break;
     case "]":           e.preventDefault(); toggleRepeat("repEnd"); break;
@@ -3333,7 +3400,7 @@ $("#page").addEventListener("mousedown", e => {
     cursor.i   = +t.dataset.i;
     pendingFret = null;
     if (e.shiftKey && sameSection){ render(); return; }
-    if (t.dataset.str !== undefined) setString(+t.dataset.str);
+    if (t.dataset.str !== undefined && !practice) setString(+t.dataset.str);
     else {
       const n = curNote();
       if (n && !n.rest){ entry.string = n.string; entry.dur = n.dur; entry.dots = n.dots; }
@@ -3854,6 +3921,7 @@ $("#btnPrint").addEventListener("click", () => { stopPlayback(); window.print();
 
 $("#btnPlay").addEventListener("click", togglePlayback);
 $("#btnFull").addEventListener("click", toggleReading);
+$("#btnPractice").addEventListener("click", togglePractice);
 $("#rExit").addEventListener("click", leaveReading);
 $("#rPlay").addEventListener("click", togglePlayback);
 $("#rLoop").addEventListener("click", toggleLoop);
