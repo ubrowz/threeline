@@ -412,6 +412,15 @@
             title="One bar of clicks before the music starts, in the metre it is about to start in">
           <span class="muted">one bar first</span>
         </div>
+        <div class="row"><label>Drums</label>
+          <select class="fld" id="fDrums" title="A drummer to practise against. The beats come from each bar's own metre, so odd time signatures are followed, and the kick lands where the bass does.">
+            <option value="off">off</option>
+            <option value="rock">rock</option>
+            <option value="half">half-time</option>
+            <option value="swing">shuffle</option>
+            <option value="ride">quiet</option>
+          </select>
+        </div>
         <div class="row"><label>Sound</label>
           <select class="fld" id="fSound" title="Which bass it sounds like. Where a pickup sits along the string is what changes the tone.">
             <option value="plain">plain</option>
@@ -1732,6 +1741,7 @@ let audioCtx = null, playTimer = null, play = null;
 let loopOn = false, playRate = 1;          // practice settings, not part of the song
 let metroOn = false, countInOn = false;
 let bassSound = "plain";
+let drumFeel = "off";
 let reading = false, readZoom = 1;
 let practice = false;      // the music is fixed; only moving about and playing
 const PREF_KEY = "bass-notation-prefs";
@@ -1742,13 +1752,14 @@ function loadPrefs(){
     loopOn = !!p.loop;
     metroOn = !!p.metro;
     bassSound = PICKUPS[p.sound] !== undefined ? p.sound : "plain";
+    drumFeel = DRUM_FEELS[p.drums] !== undefined ? p.drums : "off";
     countInOn = !!p.countIn;
     playRate = Math.max(0.25, Math.min(1, +p.rate || 1));
   } catch(e){}
 }
 function savePrefs(){
   try { localStorage.setItem(PREF_KEY, JSON.stringify(
-    { loop:loopOn, rate:playRate, metro:metroOn, countIn:countInOn, sound:bassSound })); } catch(e){}
+    { loop:loopOn, rate:playRate, metro:metroOn, countIn:countInOn, sound:bassSound, drums:drumFeel })); } catch(e){}
 }
 
 function ac(){
@@ -2017,11 +2028,26 @@ function midiBytes(){
     trk.push({ tick:off, order:10 + (n++), data:[0x80, pitch, 0] });
   }
 
-  // Both tracks run to the written end of the piece, trailing rests included,
+  // --- the drummer, on channel 10 where a host expects a kit -------------
+  const beats = drumTrack(0, tl.length - 1, plan.total, spq);
+  const drums = [];
+  if (beats.length){
+    drums.push({ tick:0, order:0, data:[0xff, 0x03, ...vlq(5), ...chars("Drums")] });
+    let d = 0;
+    for (const h of beats){
+      const on = tickOf(h.t), off = on + Math.round(MIDI_PPQ / 8);   // drums are struck, not held
+      drums.push({ tick:on,  order:10 + (d++), data:[0x99, h.note, h.vel] });
+      drums.push({ tick:off, order:10 + (d++), data:[0x89, h.note, 0] });
+    }
+  }
+
+  // Every track runs to the written end of the piece, trailing rests included,
   // so the sequence is as long as the music rather than as long as its last note.
   const endTick = Math.max(tickOf(plan.total), ...trk.map(e => e.tick), 1);
-  const file = [...chars("MThd"), ...be32(6), ...be16(1), ...be16(2), ...be16(MIDI_PPQ),
-                ...midiTrack(head, endTick), ...midiTrack(trk, endTick)];
+  const tracks = [midiTrack(head, endTick), midiTrack(trk, endTick)];
+  if (drums.length) tracks.push(midiTrack(drums, endTick));
+  const file = [...chars("MThd"), ...be32(6), ...be16(1), ...be16(tracks.length),
+                ...be16(MIDI_PPQ), ...tracks.flat()];
   return new Uint8Array(file);
 }
 
@@ -2126,6 +2152,53 @@ function click(ctx, when, down, out){
   osc.connect(g); g.connect(out);
   osc.start(when);
   osc.stop(when + 0.07);
+}
+
+// Synthesised rather than sampled, so the file stays one file: a kick is a
+// sine dropping in pitch, a snare is noise plus a little tone, and the cymbals
+// are noise through a high filter with different tails.
+function drumVoice(ctx, when, note, vel, out){
+  const g = ctx.createGain();
+  const level = (vel / 127) * 0.5;
+  g.connect(out);
+
+  if (note === KICK){
+    const o = ctx.createOscillator();
+    o.type = "sine";
+    o.frequency.setValueAtTime(115, when);
+    o.frequency.exponentialRampToValueAtTime(42, when + 0.09);
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(level * 1.5, when + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 0.34);
+    o.connect(g); o.start(when); o.stop(when + 0.4);
+    return;
+  }
+
+  const n = ctx.createBufferSource();
+  n.buffer = noiseBuffer(ctx);
+  const f = ctx.createBiquadFilter();
+  const cym = note === HAT || note === CRASH || note === RIDE;
+  f.type = cym ? "highpass" : "bandpass";
+  f.frequency.value = note === HAT ? 8000 : note === CRASH ? 4200 : note === RIDE ? 6000 : 1900;
+  f.Q.value = cym ? 0.7 : 1.1;
+  const tail = note === HAT ? 0.05 : note === CRASH ? 0.9 : note === RIDE ? 0.28 : 0.15;
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.exponentialRampToValueAtTime(level * (cym ? 0.55 : 1), when + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + tail);
+  n.connect(f); f.connect(g);
+  n.start(when); n.stop(when + tail + 0.05);
+
+  if (note === SNARE){                       // a little body under the rattle
+    const o = ctx.createOscillator();
+    const og = ctx.createGain();
+    o.type = "triangle";
+    o.frequency.setValueAtTime(190, when);
+    og.gain.setValueAtTime(0.0001, when);
+    og.gain.exponentialRampToValueAtTime(level * 0.5, when + 0.003);
+    og.gain.exponentialRampToValueAtTime(0.0001, when + 0.11);
+    o.connect(og); og.connect(out);
+    o.start(when); o.stop(when + 0.16);
+  }
 }
 
 function sound(ctx, when, ev, out){
@@ -2292,6 +2365,143 @@ function countIn(fromK){
   return { clicks, dur: cap * spb };
 }
 
+/* ============================================================
+   The drummer
+   ============================================================
+
+   The beats of a bar come from that bar's own metre — the same grouping the
+   beams use — so 7/8 comes out 3+3+1 and 6/8 in two, which is exactly where a
+   bought loop gives up. The kick follows the bass: it lands on the first beat
+   always, and on any other beat the bass itself plays on, which is what makes
+   the pattern belong to the line rather than merely run alongside it.
+   ============================================================ */
+
+const KICK = 36, SNARE = 38, HAT = 42, CRASH = 49, RIDE = 51;
+
+const DRUM_FEELS = {
+  off:   { label:"off" },
+  rock:  { label:"rock",      cym:HAT,  sub:0.5, snare:"back" },
+  half:  { label:"half-time", cym:HAT,  sub:0.5, snare:"middle" },
+  swing: { label:"shuffle",   cym:HAT,  sub:0.5, snare:"back", swung:true },
+  ride:  { label:"quiet",     cym:RIDE, sub:1,   snare:"back", quiet:true }
+};
+
+// The bars a range covers, each with the beats the bass plays inside it.
+function barsOver(fromK, toK){
+  const tl = timeline();
+  if (!tl.length) return [];
+  const cache = new Map();
+  const barsOf = si => {
+    if (!cache.has(si)) cache.set(si, measuresOf(song.sections[si]));
+    return cache.get(si);
+  };
+  const barFor = e => barsOf(e.si).find(m => m.idx.indexOf(e.i) >= 0) || null;
+
+  const out = [];
+  let q = 0, cur = null;
+  const first = tl[fromK];
+  if (first){
+    const b = barFor(first);
+    let into = 0;
+    if (b){
+      const ns = song.sections[first.si].notes;
+      for (const idx of b.idx){ if (idx === first.i) break; into += noteBeats(ns[idx]); }
+    }
+    cur = { at:-into, sig: b ? b.sig : song.timeSig, si:first.si, onsets:[] };
+    out.push(cur);
+  }
+  for (let k = fromK; k <= toK && k < tl.length; k++){
+    const e = tl[k];
+    const b = barFor(e);
+    if (b && b.idx[0] === e.i && k !== fromK){
+      cur = { at:q, sig:b.sig, si:e.si, onsets:[] };
+      out.push(cur);
+    }
+    if (cur && !e.n.rest) cur.onsets.push(q - cur.at);
+    q += noteBeats(e.n);
+  }
+  return out;
+}
+
+// t is in seconds from the start of the range; note is a General MIDI drum.
+function drumTrack(fromK, toK, total, spb){
+  const feel = DRUM_FEELS[drumFeel];
+  if (!feel || drumFeel === "off") return [];
+  const bars = barsOver(fromK, toK);
+  const out = [];
+  const hit = (q, note, vel) => {
+    const t = q * spb;
+    if (t > -1e-6 && t < total - 1e-6) out.push({ t, note, vel });
+  };
+
+  bars.forEach((bar, bi) => {
+    const cap = measureCapacity(bar.sig), step = beamUnit(bar.sig);
+    const beats = [];
+    for (let x = 0; x < cap - 1e-9; x += step) beats.push(x);
+    if (!beats.length) return;
+
+    const opensSection = bi === 0 || bars[bi-1].si !== bar.si;
+    const closesSection = bi === bars.length - 1 || bars[bi+1].si !== bar.si;
+    const soft = feel.quiet ? 0.7 : 1;
+    const v = x => Math.round(Math.max(1, Math.min(127, x * soft)));
+
+    // --- cymbal ---------------------------------------------------------
+    for (let x = 0; x < cap - 1e-9; x += feel.sub){
+      const onBeat = beats.some(b => Math.abs(b - x) < 1e-6);
+      if (feel.swung && !onBeat) continue;                 // swung ones go below
+      hit(bar.at + x, feel.cym, v(onBeat ? 76 : 58));
+    }
+    if (feel.swung)
+      for (const b of beats){
+        const off = b + step * 2 / 3;
+        if (off < cap - 1e-9) hit(bar.at + off, feel.cym, v(54));
+      }
+
+    // --- snare: the backbeat, or one in the middle for half-time ----------
+    const onSnare = new Set();
+    if (feel.snare === "back") beats.forEach((b, k) => { if (k % 2 === 1) onSnare.add(k); });
+    else if (beats.length > 1) onSnare.add(Math.floor(beats.length / 2));
+    for (const k of onSnare) hit(bar.at + beats[k], SNARE, v(98));
+
+    // --- kick: the downbeat, then wherever the bass goes ------------------
+    // Off-beat onsets count, since that is where a bass line's push lives. The
+    // snare's beats are left alone. A bass playing everything would otherwise
+    // put a kick under every eighth, so past a certain density it drops back to
+    // the plain pattern rather than turning into a machine gun.
+    const plain = new Set([0]);
+    beats.forEach((b, k) => { if (k > 0 && k % 2 === 0) plain.add(b); });
+
+    let kicks = new Set([0]);
+    for (const o of bar.onsets){
+      if (o < 0 || o >= cap - 1e-9) continue;
+      if (Math.abs(o / feel.sub - Math.round(o / feel.sub)) > 1e-6) continue;  // off the grid
+      const at = beats.findIndex(x => Math.abs(x - o) < 1e-6);
+      if (at >= 0 && onSnare.has(at)) continue;
+      kicks.add(o);
+    }
+    if (kicks.size > Math.max(2, beats.length)) kicks = plain;
+    for (const q of kicks) hit(bar.at + q, KICK, v(102));
+
+    // --- the shape of the song --------------------------------------------
+    if (opensSection) hit(bar.at, CRASH, v(104));
+    if (closesSection && bi !== bars.length - 1 && beats.length > 1){
+      // A turn into the next part, after the last beat rather than on it —
+      // that beat already has the backbeat snare on it.
+      const from = beats[beats.length - 1];
+      hit(bar.at + from + step / 2, SNARE, v(76));
+      hit(bar.at + from + step * 3 / 4, SNARE, v(92));
+    }
+  });
+  // Two of the same drum at the same instant is one drum played louder in the
+  // room, but in a MIDI file it is two note-ons for one note — so keep the
+  // louder and drop the other.
+  out.sort((a, b) => a.t - b.t || a.note - b.note || b.vel - a.vel);
+  return out.filter((h, i) => {
+    const p = out[i - 1];
+    return !(p && p.note === h.note && Math.abs(p.t - h.t) < 1e-6);
+  });
+}
+
 const LOOKAHEAD = 0.42;
 const PLAY_LINE = 0.24;      // where a line lands after a turn, from the top
 
@@ -2384,9 +2594,12 @@ function startPlayback(){
   if (lead)
     for (const c of lead.clicks) click(ctx, t0 - lead.dur + c.t, c.down, master);
 
+  const spb = 60 / ((song.tempo || 90) * playRate);
   play = { ctx, master, plan, t0,
            clicks: metroOn ? beatTrack(range[0], range[1], plan.total) : [],
+           drums: drumTrack(range[0], range[1], plan.total, spb),
            sched: { k: 0, cycle: 0 }, clickSched: { k: 0, cycle: 0 },
+           drumSched: { k: 0, cycle: 0 },
            shown: -1, shownCycle: -1 };
   playTimer = setInterval(pump, 25);
   requestAnimationFrame(followPlayhead);
@@ -2401,6 +2614,11 @@ function pump(){
   const now = st.ctx.currentTime;
   for (const { when, ev } of windowEvents(st.plan, st.t0, st.sched, now, now + 0.2, loopOn))
     sound(st.ctx, when, ev, st.master);
+
+  if (st.drums.length)
+    for (const { when, ev } of windowEvents({ events: st.drums, total: st.plan.total },
+                                            st.t0, st.drumSched, now, now + 0.2, loopOn))
+      drumVoice(st.ctx, when, ev.note, ev.vel, st.master);
 
   // the beat track loops with the music, but the count-in never repeats
   if (st.clicks.length)
@@ -2530,6 +2748,13 @@ document.addEventListener("fullscreenchange", () => {
   if (!document.fullscreenElement && reading) leaveReading();
 });
 
+function setDrums(v){
+  drumFeel = DRUM_FEELS[v] !== undefined ? v : "off";
+  savePrefs();
+  if (isPlaying()) startPlayback();     // pick the pattern up straight away
+  updateTransport();
+}
+
 function setSound(v){
   bassSound = PICKUPS[v] !== undefined ? v : "plain";
   savePrefs();
@@ -2572,6 +2797,8 @@ function updateTransport(){
   if (r) r.value = String(Math.round(playRate * 100));
   const so = $("#fSound");
   if (so) so.value = bassSound;
+  const dr = $("#fDrums");
+  if (dr) dr.value = drumFeel;
   const rp = $("#rPlay");
   if (rp){
     rp.textContent = isPlaying() ? "Stop" : "Play";
@@ -4103,6 +4330,7 @@ $("#rIn").addEventListener("click", () => setReadZoom(readZoom + 0.1));
 $("#rOut").addEventListener("click", () => setReadZoom(readZoom - 0.1));
 $("#fMetro").addEventListener("change", e => setMetro(e.target.checked));
 $("#fSound").addEventListener("change", e => setSound(e.target.value));
+$("#fDrums").addEventListener("change", e => setDrums(e.target.value));
 $("#fCountIn").addEventListener("change", e => setCountIn(e.target.checked));
 $("#btnLoop").addEventListener("click", toggleLoop);
 $("#fRate").addEventListener("change", e => setRate(+e.target.value / 100));
