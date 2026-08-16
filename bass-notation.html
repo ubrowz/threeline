@@ -257,6 +257,7 @@
     <button class="btn" id="btnSaveAs" title="Save to a new file (⇧⌘S)">Save as…</button>
     <button class="btn" id="btnPractice" title="Lock the music so it cannot be changed by accident while you play along. Moving about, choosing what to loop and playing all still work. (⇧P)">Practice</button>
     <button class="btn" id="btnFull" title="Hide the editor and show only the music, large enough to read from a stand (f)">Full screen</button>
+    <button class="btn" id="btnMidi" title="Write the line out as a MIDI file, for GarageBand or any DAW. Pitch and rhythm travel; the string and fret cannot, because MIDI has no word for them.">MIDI</button>
     <button class="btn" id="btnPrint" title="Print, or save as a PDF. Only the music is printed — none of the editor.">Print / PDF</button>
     <span style="width:10px"></span>
     <button class="btn" id="btnPlay" title="Play from the selected note, or play the selection (⌘↵)">Play</button>
@@ -1562,7 +1563,13 @@ function renderSidebar(){
   if (isRefSection()){
     const kept = curSection().notes.length;
     const brk = !!curSection().pageBrk;   // a reference section breaks before itself
-    ins.innerHTML = `<div class="empty">This section shows its name only.</div>`
+    const src = refSource(cursor.sec);
+    const plays = src >= 0 && src !== cursor.sec
+      ? `<div class="muted" style="margin-top:7px">Plays the notes of <b>${esc(song.sections[src].heading || "the earlier section")}</b> above.</div>`
+      : src === cursor.sec
+        ? `<div class="muted" style="margin-top:7px">Plays the notes it is keeping hidden. Name it after an earlier section to play that one instead.</div>`
+        : `<div class="muted" style="margin-top:7px">Nothing to play — name it after an earlier section, e.g. <b>Chorus</b>.</div>`;
+    ins.innerHTML = `<div class="empty">This section shows its name only.</div>` + plays
       + (kept ? `<div class="muted" style="margin-top:7px">${kept} note${kept>1?"s":""} kept, hidden. Turn <b>R</b> off in the list to show them again.</div>`
               : `<div class="muted" style="margin-top:7px">Type its name in the list, e.g. “Chorus”.</div>`)
       + `<div class="row" style="margin-top:10px"><label>New page</label>
@@ -1754,15 +1761,37 @@ function isPlaying(){ return !!play; }
 // Every note in playing order, reference sections skipped and repeats expanded:
 // a bar closing a repeat replays back to the last |: — or to the start of the
 // section if there is none — until it has been played repTimes in total.
+// A reference is the same music again under the same name, so it plays the
+// notes of the nearest earlier section called that. Failing a match it falls
+// back to whatever notes it is keeping hidden, and failing both it is silent.
+function refSource(si){
+  const sec = song.sections[si];
+  const want = (sec.heading || "").trim().toLowerCase();
+  if (want){
+    for (let k = si - 1; k >= 0; k--){
+      const c = song.sections[k];
+      if (!c.ref && c.notes.length && (c.heading || "").trim().toLowerCase() === want) return k;
+    }
+  }
+  return sec.notes.length ? si : -1;
+}
+
 function timeline(){
   const out = [];
   const follow = song.followRepeats !== false;
 
   song.sections.forEach((sec, si) => {
-    if (sec.ref || !sec.notes.length) return;
-    const ns = sec.notes;
-    const bars = splitMeasures(ns, sigAt(si));
-    const emit = b => { for (const i of bars[b].idx) out.push({ si, i, n: ns[i] }); };
+    let from = si;
+    if (sec.ref){
+      from = refSource(si);
+      if (from < 0) return;
+    } else if (!sec.notes.length) return;
+
+    // The notes played are the source's, and so is where the playhead lights
+    // up — a reference has nothing drawn of its own to follow.
+    const ns = song.sections[from].notes;
+    const bars = splitMeasures(ns, sigAt(from));
+    const emit = b => { for (const i of bars[b].idx) out.push({ si: from, i, n: ns[i] }); };
 
     const headOf = b => (bars[b].idx.length ? ns[bars[b].idx[0]] : null);
     const endingOf = b => ((headOf(b) || {}).ending || 0);
@@ -1815,8 +1844,8 @@ const tiedFromPrev = (tl, k) =>
 
 // events = what to sound, steps = where the playhead is (rests included).
 // Repeat signs are not expanded: playback follows the notes as written.
-function buildPlan(fromK, toK){
-  const spb = 60 / ((song.tempo || 90) * playRate);
+function buildPlan(fromK, toK, rate){
+  const spb = 60 / ((song.tempo || 90) * (rate === undefined ? playRate : rate));
   const tl = timeline();
   const events = [], steps = [];
   let t = 0;
@@ -1882,6 +1911,150 @@ function loopScope(){
   return selRange()
     ? `${notes} note${notes === 1 ? "" : "s"} · ${bars}`
     : `${bars}, to the end — select notes to loop just those`;
+}
+
+/* ============================================================
+   MIDI — the line, for a DAW
+   ============================================================
+
+   What a MIDI file can hold is pitch and time, so that is what goes: the notes
+   as played, with the repeats already expanded, ties already joined, and
+   staccato already shortened, because the play plan does all three.
+
+   What it cannot hold is which string and which fret — the same pitch is in
+   several places on the neck and MIDI has no word for the difference. Nor for
+   a hammer-on, a pull-off or a slide, beyond playing the notes more quietly.
+   The line exports; the playing does not.
+   ============================================================ */
+
+const MIDI_PPQ = 480;
+
+function vlq(n){                       // variable-length quantity, as the spec asks
+  const out = [n & 0x7f];
+  n >>= 7;
+  while (n > 0){ out.unshift((n & 0x7f) | 0x80); n >>= 7; }
+  return out;
+}
+const bytes = (...v) => v;
+const be32 = n => [(n>>>24)&255, (n>>>16)&255, (n>>>8)&255, n&255];
+const be16 = n => [(n>>>8)&255, n&255];
+const chars = t => [...t].map(c => c.charCodeAt(0) & 0x7f);
+
+// `endTick` matters more than it looks: a track whose end-of-track sits at zero
+// is a zero-length track, and a host that takes the song length from the
+// conductor track then has a song of no length — which is how an imported file
+// ends up looping round for ever instead of stopping.
+function midiTrack(events, endTick){
+  events.sort((a, b) => a.tick - b.tick || a.order - b.order);
+  const body = [];
+  let at = 0;
+  for (const e of events){
+    body.push(...vlq(e.tick - at), ...e.data);
+    at = e.tick;
+  }
+  body.push(...vlq(Math.max(0, (endTick || 0) - at)), 0xff, 0x2f, 0x00);
+  return [...chars("MTrk"), ...be32(body.length), ...body];
+}
+
+// Where the metre changes, in ticks, so a 7/8 bar arrives as a 7/8 bar.
+function midiSigs(tl, tickAt){
+  const out = [];
+  const cache = new Map();
+  const barsOf = si => {
+    if (!cache.has(si)) cache.set(si, measuresOf(song.sections[si]));
+    return cache.get(si);
+  };
+  let beats = 0, shown = null;
+  for (const e of tl){
+    const bar = barsOf(e.si).find(m => m.idx.indexOf(e.i) >= 0);
+    if (bar && bar.idx[0] === e.i && !sameSig(bar.sig, shown)){
+      out.push({ tick: tickAt(beats), sig: bar.sig });
+      shown = bar.sig;
+    }
+    beats += noteBeats(e.n);
+  }
+  if (!out.length) out.push({ tick: 0, sig: theSig(song.timeSig) });
+  return out;
+}
+
+function midiBytes(){
+  const tl = timeline();
+  if (!tl.length) return null;
+  // At the written tempo, whatever the practice speed happens to be set to.
+  const plan = buildPlan(0, tl.length - 1, 1);
+  const tempo = song.tempo || 90;
+  const spq = 60 / tempo;                          // seconds per quarter
+  const tickAt = beats => Math.max(0, Math.round(beats * MIDI_PPQ));
+  const tickOf = secs => tickAt(secs / spq);
+
+  const name = (song.title && song.title !== "Untitled") ? song.title : "Threeline";
+
+  // --- the conductor track: name, tempo, metre --------------------------
+  const head = [];
+  head.push({ tick:0, order:0, data:[0xff, 0x03, ...vlq(chars(name).length), ...chars(name)] });
+  const usPerQuarter = Math.round(60000000 / tempo);
+  head.push({ tick:0, order:1, data:[0xff, 0x51, 0x03,
+    (usPerQuarter>>16)&255, (usPerQuarter>>8)&255, usPerQuarter&255] });
+  for (const s of midiSigs(tl, tickAt)){
+    const den = Math.round(Math.log2(s.sig.unit));
+    head.push({ tick:s.tick, order:2, data:[0xff, 0x58, 0x04, s.sig.beats, den, 24, 8] });
+  }
+
+  // --- the notes ---------------------------------------------------------
+  const trk = [];
+  trk.push({ tick:0, order:0, data:[0xff, 0x03, ...vlq(4), ...chars("Bass")] });
+  trk.push({ tick:0, order:1, data:[0xc0, 33] });   // electric bass, if the host cares
+  let n = 0;
+  for (const ev of plan.events){
+    const on = tickOf(ev.t);
+    // a ghost note has no pitch to send, so it goes in short and quiet — the
+    // rhythm survives even though the sound of it cannot
+    const vel = ev.dead ? 40 : ev.soft ? 68 : 96;
+    const len = ev.dead ? Math.round(MIDI_PPQ / 8) : tickOf(ev.dur);
+    const off = Math.max(on + 1, on + len);
+    const pitch = Math.max(0, Math.min(127, ev.midi));
+    trk.push({ tick:on,  order:10 + (n++), data:[0x90, pitch, vel] });
+    trk.push({ tick:off, order:10 + (n++), data:[0x80, pitch, 0] });
+  }
+
+  // Both tracks run to the written end of the piece, trailing rests included,
+  // so the sequence is as long as the music rather than as long as its last note.
+  const endTick = Math.max(tickOf(plan.total), ...trk.map(e => e.tick), 1);
+  const file = [...chars("MThd"), ...be32(6), ...be16(1), ...be16(2), ...be16(MIDI_PPQ),
+                ...midiTrack(head, endTick), ...midiTrack(trk, endTick)];
+  return new Uint8Array(file);
+}
+
+function midiName(){
+  const base = (song.title && song.title !== "Untitled" ? song.title : "bass-line")
+    .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return (base || "bass-line") + ".mid";
+}
+
+async function exportMidi(){
+  const data = midiBytes();
+  if (!data){ return; }
+  const blob = new Blob([data], { type:"audio/midi" });
+  if (CAN_PICK){
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: midiName(),
+        types: [{ description:"MIDI file", accept:{ "audio/midi":[".mid"] } }]
+      });
+      const w = await handle.createWritable();
+      await w.write(blob);
+      await w.close();
+      return;
+    } catch (err){
+      if (err && err.name === "AbortError") return;    // you closed the dialog
+      // anything else: fall through to a plain download
+    }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = midiName();
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 
 // A selection plays alone; otherwise play from the cursor to the end.
@@ -3922,6 +4095,7 @@ $("#btnPrint").addEventListener("click", () => { stopPlayback(); window.print();
 $("#btnPlay").addEventListener("click", togglePlayback);
 $("#btnFull").addEventListener("click", toggleReading);
 $("#btnPractice").addEventListener("click", togglePractice);
+$("#btnMidi").addEventListener("click", exportMidi);
 $("#rExit").addEventListener("click", leaveReading);
 $("#rPlay").addEventListener("click", togglePlayback);
 $("#rLoop").addEventListener("click", toggleLoop);
