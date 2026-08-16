@@ -162,6 +162,14 @@
   .muted{color:var(--ink-2);font-size:12px}
   #saveState{white-space:nowrap;font-variant-numeric:tabular-nums}
   #saveState.dirty{color:#9a6b12;font-weight:600}
+  /* a moment of green, so pressing Save is visibly something rather than nothing */
+  #saveState.flash{animation:saved 1.4s ease-out}
+  @keyframes saved{
+    0%{color:#1f7a3d;font-weight:600}
+    70%{color:#1f7a3d;font-weight:600}
+    100%{color:inherit;font-weight:inherit}
+  }
+  @media (prefers-reduced-motion:reduce){ #saveState.flash{animation:none} }
   .empty{color:var(--ink-2);font-size:12.5px;font-style:italic}
   .chordhead{display:flex;align-items:baseline;gap:8px;margin-bottom:8px}
   .chordhead b{font-size:16px;font-weight:700;letter-spacing:-.01em}
@@ -2065,11 +2073,16 @@ async function exportMidi(){
     try {
       const handle = await window.showSaveFilePicker({
         suggestedName: midiName(),
-        types: [{ description:"MIDI file", accept:{ "audio/midi":[".mid"] } }]
+        types: [{ description:"MIDI file", accept:{ "audio/midi":[".mid"] } }],
+        id: PICK_MIDI,
+        // where the last one went, which beats the remembered folder when both
+        // are known — and the id carries it over to the next session
+        ...(midiHandle ? { startIn: midiHandle } : {})
       });
       const w = await handle.createWritable();
       await w.write(blob);
       await w.close();
+      midiHandle = handle;
       return;
     } catch (err){
       if (err && err.name === "AbortError") return;    // you closed the dialog
@@ -4067,6 +4080,13 @@ const CAN_PICK = typeof window.showSaveFilePicker === "function"
 let fileHandle = null;     // the file being edited, once one has been chosen
 let fileName = "";
 let savedText = null;      // last written text; null means "not known yet"
+let savedAt = null;        // when it was last written, this session
+let midiHandle = null;     // the last MIDI written, so the next one starts there
+
+// Chrome keeps the folder you last used against whichever `id` the picker was
+// given, and remembers it across sessions. Two ids rather than one, so writing
+// a MIDI somewhere does not drag the next Save over to that folder as well.
+const PICK_SONG = "threeline-song", PICK_MIDI = "threeline-midi";
 
 // A file handle survives a reload if it is kept in IndexedDB — localStorage
 // cannot hold one. The browser still asks permission before the next write,
@@ -4123,9 +4143,22 @@ function suggestedName(){
 
 function songText(){ return JSON.stringify(song, null, 2); }
 
-function updateFileState(){
+const clockOf = d => String(d.getHours()).padStart(2, "0") + ":"
+                   + String(d.getMinutes()).padStart(2, "0");
+
+// A browser is never told which folder a file is in — a handle carries its name
+// and nothing else, on purpose — so the folder cannot be shown however much one
+// would like to. What can be shown is exactly which file was written and when,
+// which is what you actually want to know after pressing Save.
+function updateFileState(justSaved){
   const el = $("#saveState");
   if (!el) return;
+
+  el.title = fileName
+    ? "The file this song is written to. A page is never told which folder that "
+      + "is in — the browser does not allow it — so use Save as… to see or change where it goes."
+    : "Nothing has been saved to a file yet. Save writes a .json wherever you choose.";
+
   if (!fileName){
     el.textContent = CAN_PICK ? "not saved to a file" : "autosaved here";
     el.classList.remove("dirty");
@@ -4139,8 +4172,16 @@ function updateFileState(){
     return;
   }
   const changed = songText() !== savedText;
-  el.textContent = fileName + (changed ? " · unsaved changes" : " · saved");
+  el.textContent = fileName
+    + (changed ? " · unsaved changes"
+               : savedAt ? " · saved " + clockOf(savedAt) : " · saved");
   el.classList.toggle("dirty", changed);
+
+  if (justSaved && !changed){
+    el.classList.remove("flash");
+    void el.offsetWidth;                 // restart the animation
+    el.classList.add("flash");
+  }
 }
 
 async function writable(handle){
@@ -4162,8 +4203,9 @@ async function writeSong(handle){
   fileHandle = handle;
   fileName = handle.name;
   savedText = text;
+  savedAt = new Date();
   rememberHandle(handle);
-  updateFileState();
+  updateFileState(true);
   return true;
 }
 
@@ -4176,7 +4218,9 @@ function downloadSong(){        // the fallback: always a new file
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   savedText = text;
-  updateFileState();
+  savedAt = new Date();
+  fileName = a.download;
+  updateFileState(true);
 }
 
 // Save writes over the file you chose. Save as always asks.
@@ -4189,7 +4233,9 @@ async function saveFile(askAgain){
     }
     const handle = await window.showSaveFilePicker({
       suggestedName: fileName || suggestedName(),
-      types: FILE_TYPES
+      types: FILE_TYPES,
+      id: PICK_SONG,
+      ...(fileHandle ? { startIn: fileHandle } : {})
     });
     await writeSong(handle);
   } catch (err){
@@ -4208,7 +4254,10 @@ async function saveFile(askAgain){
 async function openFile(){
   if (!CAN_PICK){ $("#fileInput").click(); return; }
   try {
-    const [handle] = await window.showOpenFilePicker({ types: FILE_TYPES, multiple: false });
+    const [handle] = await window.showOpenFilePicker({
+      types: FILE_TYPES, multiple: false, id: PICK_SONG,
+      ...(fileHandle ? { startIn: fileHandle } : {})
+    });
     const text = await (await handle.getFile()).text();
     loadSong(JSON.parse(text));
     fileHandle = handle;                 // so Save writes back to this file
