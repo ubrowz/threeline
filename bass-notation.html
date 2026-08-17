@@ -121,6 +121,12 @@
     background:var(--accent-soft); color:var(--ink);
   }
   .carryover[hidden]{ display:none }
+  .notice{
+    border:1px solid var(--line); border-radius:9px;
+    padding:10px 11px; margin-bottom:12px; font-size:12.5px;
+    background:var(--panel-2); color:var(--ink); line-height:1.5;
+  }
+  .notice[hidden]{ display:none }
   .locked{
     display:none; align-items:center; gap:8px;
     border:1px dashed var(--line); border-radius:9px;
@@ -266,7 +272,7 @@
   <div class="topbar">
     <div class="brand">Threeline</div>
     <button class="btn" id="btnNew" title="Start again with an empty transcription. Save this one first if you want to keep it.">New</button>
-    <button class="btn" id="btnOpen" title="Open a .json transcription from your own machine">Open…</button>
+    <button class="btn" id="btnOpen" title="Open a .json transcription, or a .mid to turn into a starting draft">Open…</button>
     <button class="btn primary" id="btnSave" title="Save (⌘S)">Save</button>
     <button class="btn" id="btnSaveAs" title="Save to a new file (⇧⌘S)">Save as…</button>
     <button class="btn" id="btnPractice" title="Lock the music so it cannot be changed by accident while you play along. Moving about, choosing what to loop and playing all still work. (⇧P)">Practice</button>
@@ -289,7 +295,7 @@
     <span class="muted" id="saveState"></span>
     <button class="btn" id="btnUndo" title="Undo (⌘Z)">Undo</button>
     <button class="btn" id="btnRedo" title="Redo (⇧⌘Z)">Redo</button>
-    <input type="file" id="fileInput" accept=".json,application/json" hidden>
+    <input type="file" id="fileInput" accept=".json,.mid,.midi,application/json,audio/midi" hidden>
   </div>
 
   <div class="main">
@@ -298,6 +304,11 @@
     </div>
 
     <div class="sidebar">
+
+      <div class="notice" id="notice" hidden>
+        <div id="noticeText"></div>
+        <div style="margin-top:8px"><button class="btn" id="btnNoticeOk" style="width:100%">Right you are</button></div>
+      </div>
 
       <div class="carryover" id="carryover" hidden>
         <div><b>Started empty.</b> What you had open here last time is kept, in case you want it.</div>
@@ -2125,6 +2136,293 @@ function midiBytes(){
   const file = [...chars("MThd"), ...be32(6), ...be16(1), ...be16(tracks.length),
                 ...be16(MIDI_PPQ), ...tracks.flat()];
   return new Uint8Array(file);
+}
+
+/* ============================================================
+   Reading a MIDI file
+   ============================================================
+
+   Coming back the other way, the missing information is the neck: MIDI knows a
+   pitch, not where you would play it. A low G is the 3rd fret of the E string
+   or the 8th of the A, and something has to choose. So the fingering is worked
+   out here rather than read — see fingerLine — and it is a first draft you are
+   expected to argue with, not a restoration of a transcription.
+   ============================================================ */
+
+function readSMF(bytes){
+  const b = bytes;
+  let p = 0;
+  const str = n => { let out = ""; for (let i = 0; i < n; i++) out += String.fromCharCode(b[p++]); return out; };
+  const u32 = () => { const v = (b[p]<<24)|(b[p+1]<<16)|(b[p+2]<<8)|b[p+3]; p += 4; return v >>> 0; };
+  const u16 = () => { const v = (b[p]<<8)|b[p+1]; p += 2; return v; };
+  const vlq = () => { let v = 0, c, guard = 0;
+    do { c = b[p++]; v = (v << 7) | (c & 0x7f); } while ((c & 0x80) && guard++ < 8);
+    return v; };
+
+  if (str(4) !== "MThd") throw new Error("That is not a MIDI file.");
+  const headLen = u32();
+  const format = u16(), ntrks = u16(), division = u16();
+  p += Math.max(0, headLen - 6);
+  if (division & 0x8000) throw new Error("This file measures time in SMPTE frames, which is not supported.");
+  const ppq = division || 480;
+
+  const tempos = [], sigs = [], voices = new Map();   // keyed by track and channel
+  for (let t = 0; t < ntrks && p < b.length; t++){
+    if (str(4) !== "MTrk") break;
+    // the length counts the bytes after it, so the end is measured from there
+    const len = u32();
+    const end = p + len;
+    let tick = 0, running = 0;
+    const open = new Map();
+    while (p < end && p < b.length){
+      tick += vlq();
+      let st = b[p];
+      if (st < 0x80) st = running; else p++;
+      running = st;
+      if (st === 0xff){
+        const type = b[p++], n = vlq(), at = p;
+        p += n;
+        if (type === 0x51 && n === 3)
+          tempos.push({ tick, usPerQuarter: (b[at]<<16)|(b[at+1]<<8)|b[at+2] });
+        if (type === 0x58 && n >= 2)
+          sigs.push({ tick, beats: b[at], unit: Math.pow(2, b[at+1]) });
+      } else if (st === 0xf0 || st === 0xf7){
+        p += vlq();
+      } else {
+        const kind = st & 0xf0, ch = st & 0x0f;
+        const a = b[p++];
+        const c = (kind === 0xc0 || kind === 0xd0) ? 0 : b[p++];
+        const key = t + ":" + ch;
+        if (!voices.has(key)) voices.set(key, { ch, program: -1, notes: [] });
+        const v = voices.get(key);
+        if (kind === 0xc0) v.program = a;
+        else if (kind === 0x90 && c > 0) open.set(key + ":" + a, { pitch:a, on:tick, vel:c });
+        else if (kind === 0x80 || (kind === 0x90 && c === 0)){
+          const held = open.get(key + ":" + a);
+          if (held){ held.off = tick; v.notes.push(held); open.delete(key + ":" + a); }
+        }
+      }
+    }
+    // a note still held when the track ends stops there
+    for (const [k, held] of open){
+      held.off = tick;
+      const v = voices.get(k.slice(0, k.lastIndexOf(":")));
+      if (v) v.notes.push(held);
+    }
+    p = end;                       // whatever the events left behind
+  }
+  return { format, ppq, tempos, sigs,
+           voices: [...voices.values()].filter(v => v.notes.length) };
+}
+
+// Which of them is the bass? A part told to be one wins; failing that the one
+// that sits lowest, since that is what a bass line is. Drums are never it.
+function pickBass(voices){
+  const playable = voices.filter(v => v.ch !== 9);
+  if (!playable.length) return null;
+  const mean = v => v.notes.reduce((n, x) => n + x.pitch, 0) / v.notes.length;
+  const named = playable.filter(v => v.program >= 32 && v.program <= 39);
+  const from = named.length ? named : playable;
+  return from.slice().sort((a, b) => mean(a) - mean(b) || b.notes.length - a.notes.length)[0];
+}
+
+// Lengths this notation can write, longest first, so any grid-aligned span can
+// be spelled as one of them or a few tied together.
+const WRITABLE = [
+  { beats:4,    dur:"w", dots:0 }, { beats:3,    dur:"h", dots:1 },
+  { beats:2,    dur:"h", dots:0 }, { beats:1.5,  dur:"q", dots:1 },
+  { beats:1,    dur:"q", dots:0 }, { beats:0.75, dur:"e", dots:1 },
+  { beats:0.5,  dur:"e", dots:0 }, { beats:0.25, dur:"s", dots:0 }
+];
+
+function spell(beats){
+  const out = [];
+  let left = Math.round(beats * 4) / 4;
+  let guard = 0;
+  while (left > 1e-9 && guard++ < 64){
+    const piece = WRITABLE.find(w => w.beats <= left + 1e-9);
+    if (!piece) break;
+    out.push(piece);
+    left = Math.round((left - piece.beats) * 4) / 4;
+  }
+  return out;
+}
+
+// Where to put each pitch. Every note has three or four places it could go, so
+// this scores a run of choices by how far the hand travels and takes the
+// cheapest path through the line — which is close to what a player does, since
+// most of playing a bass line is not leaping about.
+function fingerLine(pitches, strings){
+  const places = pitches.map(p => {
+    const list = [];
+    for (let st = 0; st < strings.length; st++){
+      const fret = p - strings[st];
+      if (fret >= 0 && fret <= 24) list.push({ string:st, fret });
+    }
+    if (!list.length){                       // off the neck: the nearest thing to it
+      const low = strings[0], high = strings[strings.length - 1] + 24;
+      list.push(p < low ? { string:0, fret:0, adrift:true }
+                        : { string:strings.length - 1, fret:24, adrift:true });
+    }
+    return list;
+  });
+
+  // What is expensive is moving the hand, not the interval. An open string
+  // costs no movement and leaves the hand where it was, which is why a player
+  // crosses to an open D rather than shifting up the A — so the position the
+  // hand is in has to be carried along, not just the last note played.
+  const cost = [], from = [], hand = [];
+  places.forEach((list, i) => {
+    cost.push(list.map(() => Infinity));
+    from.push(list.map(() => -1));
+    hand.push(list.map(() => null));
+    list.forEach((cand, j) => {
+      const settle = cand.fret * 0.05;
+      if (i === 0){
+        cost[0][j] = settle;
+        hand[0][j] = cand.fret === 0 ? null : cand.fret;
+        return;
+      }
+      places[i-1].forEach((prev, k) => {
+        const was = hand[i-1][k];
+        const move = cand.fret === 0 ? 0.15
+                   : was === null ? 0
+                   : Math.abs(cand.fret - was);
+        const cross = Math.abs(cand.string - prev.string) * 0.25;
+        const total = cost[i-1][k] + move + cross + settle;
+        if (total < cost[i][j]){
+          cost[i][j] = total;
+          from[i][j] = k;
+          hand[i][j] = cand.fret === 0 ? was : cand.fret;
+        }
+      });
+    });
+  });
+
+  const out = [];
+  let i = places.length - 1;
+  if (i < 0) return out;
+  let j = cost[i].indexOf(Math.min(...cost[i]));
+  while (i >= 0){ out[i] = places[i][j]; j = from[i][j]; i--; }
+  return out;
+}
+
+// What the drummer on the file was doing. Threeline keeps no drum notes — it
+// plays its own from a feel — so the hits cannot be imported, but they can be
+// read well enough to choose which feel to put on.
+const KIT = { kick:[35,36], snare:[37,38,40], hat:[42,44,46], ride:[51,53,59] };
+
+function feelFromKit(voice, ppq, sig){
+  if (!voice || voice.notes.length < 4) return null;
+  const bar = measureCapacity(sig), step = beamUnit(sig);
+  const beats = Math.max(1, Math.round(bar / step));
+  const at = n => (n.on / ppq) % bar;                   // quarters into the bar
+  const is = (n, set) => set.indexOf(n.pitch) >= 0;
+
+  // ride or hats? a ride part is the quiet one
+  const hats  = voice.notes.filter(n => is(n, KIT.hat));
+  const rides = voice.notes.filter(n => is(n, KIT.ride));
+
+  // straight or swung: where the offbeats sit inside a beat
+  const offs = hats.concat(rides)
+    .map(n => ((n.on / ppq) / step) % 1)
+    .filter(f => f > 0.25 && f < 0.9);
+  const swung = offs.length >= 2
+    && (offs.reduce((a, b) => a + b, 0) / offs.length) > 0.58;
+  if (swung) return "swing";
+  if (rides.length > hats.length) return "ride";
+
+  // where the snare falls tells rock from half-time
+  const tally = new Map();
+  for (const n of voice.notes.filter(x => is(x, KIT.snare))){
+    const idx = at(n) / step;
+    if (Math.abs(idx - Math.round(idx)) > 0.1) continue;
+    const k = Math.round(idx) % beats;
+    tally.set(k, (tally.get(k) || 0) + 1);
+  }
+  if (!tally.size) return null;
+  const total = [...tally.values()].reduce((a, b) => a + b, 0);
+  const onOdd = [...tally].filter(([k]) => k % 2 === 1)
+                          .reduce((a, [, v]) => a + v, 0);
+  if (onOdd > total * 0.6) return "rock";
+  const middle = tally.get(Math.floor(beats / 2)) || 0;
+  if (beats > 2 && middle > total * 0.6) return "half";
+  return "rock";
+}
+
+// A MIDI file as a song. Onsets are snapped to sixteenths — anything recorded
+// by hand sits a few milliseconds off the grid, and this is the line between a
+// readable transcription and a thicket of tied 32nds.
+function songFromMidi(bytes, name){
+  const midi = readSMF(bytes);
+  const voice = pickBass(midi.voices);
+  if (!voice || !voice.notes.length) throw new Error("No notes found in that file.");
+
+  const ppq = midi.ppq;
+  const grid = q => Math.round((q / ppq) * 4) / 4;      // ticks to quarters, to a 16th
+
+  // one note at a time: where several start together, the lowest is the bass
+  const byOnset = new Map();
+  for (const n of voice.notes){
+    const at = grid(n.on);
+    const best = byOnset.get(at);
+    if (!best || n.pitch < best.pitch) byOnset.set(at, n);
+  }
+  const onsets = [...byOnset.keys()].sort((a, b) => a - b);
+  if (!onsets.length) throw new Error("No notes found in that file.");
+
+  const first = onsets[0];
+  const strings = tuning();
+  const picked = fingerLine(onsets.map(a => byOnset.get(a).pitch), strings);
+
+  const notes = [];
+  let adrift = 0;
+  onsets.forEach((at, i) => {
+    const n = byOnset.get(at), place = picked[i];
+    if (place.adrift) adrift++;
+    const next = i + 1 < onsets.length ? onsets[i+1] : grid(n.off);
+    const room = Math.max(0.25, next - at);
+    const sounds = Math.max(0.25, Math.min(room, grid(n.off) - at || 0.25));
+
+    const pieces = spell(sounds);
+    pieces.forEach((piece, k) => {
+      notes.push(newNote({
+        dur: piece.dur, dots: piece.dots,
+        string: place.string, fret: place.fret,
+        tie: k < pieces.length - 1
+      }));
+    });
+    for (const piece of spell(room - sounds))
+      notes.push(newNote({ dur: piece.dur, dots: piece.dots, rest:true, string: place.string }));
+  });
+
+  // a run-up before the first note is silence, not a missing bar
+  if (first > 0)
+    for (const piece of spell(first).reverse())
+      notes.unshift(newNote({ dur: piece.dur, dots: piece.dots, rest:true, string:1 }));
+
+  const sec = newSection("");
+  sec.notes = notes;
+
+  const out = blankSong();
+  out.title = (name || "").replace(/\.[^.]*$/, "") || "Imported";
+  out.tuning = strings.slice();
+  out.sections = [sec];
+  if (midi.tempos.length)
+    out.tempo = Math.max(30, Math.min(300, Math.round(60000000 / midi.tempos[0].usPerQuarter)));
+  const sig0 = midi.sigs.find(x => x.tick === 0) || midi.sigs[0];
+  if (sig0 && sig0.beats >= 1 && [1,2,4,8,16,32].indexOf(sig0.unit) >= 0)
+    out.timeSig = { beats: sig0.beats, unit: sig0.unit };
+
+  // A kit is not one of the parts you could have chosen from, so it is counted
+  // separately — saying "the lowest of 2" when one of them is a drum track
+  // suggests a choice that was never there.
+  const kit = midi.voices.find(v => v.ch === 9);
+  return { song: out, notes: onsets.length, adrift,
+           voices: midi.voices.filter(v => v.ch !== 9).length,
+           drums: !!kit,
+           feel: kit ? feelFromKit(kit, ppq, out.timeSig) : null,
+           program: voice.program };
 }
 
 function midiName(){
@@ -4202,6 +4500,11 @@ const FILE_TYPES = [{
   description: "Threeline transcription",
   accept: { "application/json": [".json"] }
 }];
+// Open takes a MIDI too, and turns it into a starting draft.
+const OPEN_TYPES = [{
+  description: "Transcription or MIDI",
+  accept: { "application/json": [".json"], "audio/midi": [".mid", ".midi"] }
+}];
 
 function suggestedName(){
   const base = (song.title && song.title !== "Untitled" ? song.title : "bass-transcription")
@@ -4323,11 +4626,15 @@ async function openFile(){
   if (!CAN_PICK){ $("#fileInput").click(); return; }
   try {
     const [handle] = await window.showOpenFilePicker({
-      types: FILE_TYPES, multiple: false, id: PICK_SONG,
+      types: OPEN_TYPES, multiple: false, id: PICK_SONG,
       ...(fileHandle ? { startIn: fileHandle } : {})
     });
-    const text = await (await handle.getFile()).text();
-    loadSong(JSON.parse(text));
+    const file = await handle.getFile();
+    if (isMidiName(handle.name)){
+      importMidi(new Uint8Array(await file.arrayBuffer()), handle.name);
+      return;                            // a .mid is not somewhere to save back to
+    }
+    loadSong(JSON.parse(await file.text()));
     fileHandle = handle;                 // so Save writes back to this file
     fileName = handle.name;
     savedText = songText();
@@ -4377,11 +4684,16 @@ $("#fileInput").addEventListener("change", e => {
   const f = e.target.files[0];
   if (!f) return;
   const r = new FileReader();
-  r.onload = () => {
-    try { loadSong(JSON.parse(r.result)); }
-    catch (err){ alert("Could not open that file:\n" + err.message); }
-  };
-  r.readAsText(f);
+  if (isMidiName(f.name)){
+    r.onload = () => importMidi(new Uint8Array(r.result), f.name);
+    r.readAsArrayBuffer(f);
+  } else {
+    r.onload = () => {
+      try { loadSong(JSON.parse(r.result)); }
+      catch (err){ alert("Could not open that file:\n" + err.message); }
+    };
+    r.readAsText(f);
+  }
   e.target.value = "";
 });
 
@@ -4467,6 +4779,46 @@ $("#fTempo").addEventListener("input", e => {
 });
 $("#btnUndo").addEventListener("click", undo);
 $("#btnRedo").addEventListener("click", redo);
+const isMidiName = n => /\.midi?$/i.test(n || "");
+
+// A MIDI is a draft, not a transcription: it comes in unattached to any file,
+// so a later Save asks where to put it rather than writing over the .mid.
+function importMidi(bytes, name){
+  let read;
+  try { read = songFromMidi(bytes, name); }
+  catch (err){ alert("Could not read that MIDI:\n" + (err && err.message ? err.message : err)); return; }
+
+  pushUndo();
+  const stack = undoStack.slice();   // loadSong clears the history, but importing
+  loadSong(read.song);               // over your work has to be undoable
+  undoStack = stack;
+  fileHandle = null; fileName = ""; savedText = null; savedAt = null;
+  rememberHandle(null);
+  updateFileState();
+
+  const bits = [read.notes + (read.notes === 1 ? " note" : " notes") + " read"];
+  if (read.voices > 1) bits.push("the lowest of " + read.voices + " parts taken as the bass");
+  if (read.drums && read.feel){
+    setDrums(read.feel);
+    bits.push("its drum track read as a " + DRUM_FEELS[read.feel].label
+              + " feel, since Threeline plays its own rather than keeping the hits");
+  } else if (read.drums){
+    bits.push("its drum track left out — Threeline plays its own");
+  }
+  if (read.adrift) bits.push(read.adrift + " outside this bass's range, put as close as they go");
+  say("Imported " + name + " — " + bits.join(", ")
+      + ". The fingering is worked out, not read: MIDI does not record it. Change what does not suit you.");
+}
+
+// A line of plain news in the sidebar, dismissible, for things worth saying but
+// not worth stopping the work for.
+function say(text){
+  const el = $("#notice");
+  if (!el) return;
+  $("#noticeText").textContent = text;
+  el.hidden = false;
+}
+
 function showCarriedOver(){
   const el = $("#carryover");
   if (el) el.hidden = !localStorage.getItem(LS_STASH);
@@ -4492,6 +4844,7 @@ function dropCarriedOver(){
   showCarriedOver();
 }
 
+$("#btnNoticeOk").addEventListener("click", () => { $("#notice").hidden = true; });
 $("#btnCarryOn").addEventListener("click", carryOver);
 $("#btnCarryDrop").addEventListener("click", dropCarriedOver);
 
