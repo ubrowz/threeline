@@ -104,6 +104,11 @@
     color:#9aa2ad;pointer-events:none;
   }
   .system svg{display:block;overflow:visible}
+  /* Dragging across notation used to start a text selection, and the browser's
+     blue sat on top of the editor's own highlight — so selecting a passage
+     looked as though it had gone wrong. Notation is not text to be copied. */
+  .system{ user-select:none; -webkit-user-select:none; }
+  .sectionhead{ user-select:text; -webkit-user-select:text; }
   .system .hit{fill:transparent;cursor:pointer}
   .system .hit:hover{fill:rgba(47,111,208,.07)}
   .system .hit.playing{fill:rgba(47,111,208,.20)}
@@ -237,8 +242,8 @@
     zoom:var(--read-zoom,1.4);
   }
   body.reading .sectionhead{ border-color:transparent !important }
-  body.reading .system .hit{ pointer-events:none }   /* reading, not editing */
-  body.reading .system .sel{ opacity:.4 }            /* still says where Play starts */
+  /* the staff lines edit; the note bands only select. Only the first is locked. */
+  body.reading .system .hitstr{ pointer-events:none }
   .readbar{
     position:fixed; left:50%; transform:translateX(-50%); bottom:16px; z-index:150;
     display:none; gap:8px; align-items:center;
@@ -1610,7 +1615,7 @@ function render(){
 
     html += `<div class="section${sectionBreaks ? " pagebreak" : ""}" data-sec="${si}">`;
     html += `<input class="sectionhead" data-sechead="${si}" value="${esc(sec.heading)}" placeholder="section name…" `
-      + `${practice ? "readonly " : ""}`
+      + `${musicLocked() ? "readonly " : ""}`
       + `title="Name this part of the song — Intro, Verse, Chorus. It is printed above the music.">`;
     systems.forEach((sys, k) => {
       const brk = k > 0 && opensPage(sys) ? " pagebreak" : "";
@@ -3106,6 +3111,13 @@ function stepCursor(d, extend){
 
 function toggleReading(){ reading ? leaveReading() : enterReading(); }
 
+// Practice and full screen both mean the same thing about the music: look,
+// listen, choose what to play — but do not change it. Not having that in one
+// place is how full screen came to lock the wrong half: it stopped you clicking
+// a note to select it, and left the staff lines live, so a hand on the screen
+// moved a note to another string and rewrote its fret.
+function musicLocked(){ return practice || reading; }
+
 // Practice locks the music. Everything that only looks or listens stays: moving
 // the cursor, selecting what to loop, playing. Everything that writes goes,
 // including the string lines on the staff, which is the one that catches you
@@ -4015,11 +4027,25 @@ document.addEventListener("keydown", e => {
   // Reading is for playing along, so nothing that edits is reachable from the
   // keyboard while it is up.
   if (reading){
-    if (k === "Escape"){ e.preventDefault(); isPlaying() ? stopPlayback() : leaveReading(); return; }
+    if (k === "Escape"){
+      e.preventDefault();
+      if (isPlaying()) stopPlayback();
+      else if (selAnchor !== null){ selAnchor = null; render(); }
+      else leaveReading();
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === "a"){
+      e.preventDefault(); selectSection(); return;     // choosing what to loop
+    }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (k === "f" || k === "F"){ e.preventDefault(); leaveReading(); return; }
     if (k === "+" || k === "="){ e.preventDefault(); setReadZoom(readZoom + 0.1); return; }
     if (k === "-" || k === "_"){ e.preventDefault(); setReadZoom(readZoom - 0.1); return; }
-    return;
+    if (k === "ArrowLeft" || k === "ArrowRight"){
+      e.preventDefault(); stepCursor(k === "ArrowRight" ? 1 : -1, e.shiftKey); return;
+    }
+    if (k === " "){ e.preventDefault(); moveCursor(+1); return; }
+    return;                                            // everything else writes
   }
 
   // Practice: only what looks, listens or chooses. ⌘↵, ⌘L and ⌘B are handled
@@ -4166,6 +4192,12 @@ function commitText(key, v){
    Events — mouse & fields
    ============================================================ */
 
+// Dragging across the notes picks a passage, which is the gesture everyone
+// reaches for first — and reaching for it used to drag out a text selection
+// instead. Held here rather than in the cursor, since a drag has a fixed end
+// it was started from.
+let dragFrom = null;
+
 $("#page").addEventListener("mousedown", e => {
   const t = e.target;
   if (t.dataset && t.dataset.sec !== undefined && t.dataset.i !== undefined){
@@ -4178,8 +4210,10 @@ $("#page").addEventListener("mousedown", e => {
     cursor.sec = +t.dataset.sec;
     cursor.i   = +t.dataset.i;
     pendingFret = null;
-    if (e.shiftKey && sameSection){ render(); return; }
-    if (t.dataset.str !== undefined && !practice) setString(+t.dataset.str);
+    e.preventDefault();          // no text selection dragged out behind it
+    if (e.shiftKey && sameSection){ dragFrom = selAnchor; render(); return; }
+    dragFrom = cursor.i;                    // where a drag would be measured from
+    if (t.dataset.str !== undefined && !musicLocked()) setString(+t.dataset.str);
     else {
       const n = curNote();
       if (n && !n.rest){ entry.string = n.string; entry.dur = n.dur; entry.dots = n.dots; }
@@ -4190,6 +4224,20 @@ $("#page").addEventListener("mousedown", e => {
   const sec = t.closest && t.closest(".section");
   if (sec && !t.dataset.sechead){ cursor.sec = +sec.dataset.sec; renderSidebar(); renderStatus(); }
 });
+
+$("#page").addEventListener("mousemove", e => {
+  if (dragFrom === null || !e.buttons) return;
+  const t = e.target;
+  if (!t.dataset || t.dataset.i === undefined) return;
+  if (+t.dataset.sec !== cursor.sec) return;          // a drag stays in its section
+  const to = +t.dataset.i;
+  if (to === cursor.i && selAnchor === dragFrom) return;
+  selAnchor = to === dragFrom ? null : dragFrom;
+  cursor.i = to;
+  render();
+});
+
+document.addEventListener("mouseup", () => { dragFrom = null; });
 
 $("#page").addEventListener("input", e => {
   const i = e.target.dataset.sechead;
