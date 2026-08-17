@@ -115,6 +115,12 @@
   body.practice .secitem .mini{ display:none }   /* rename, reorder, delete */
   body.practice .sectionhead{ border-color:transparent; cursor:default }
   body.practice .locked{ display:flex }
+  .carryover{
+    border:1px solid var(--accent); border-radius:9px;
+    padding:10px 11px; margin-bottom:12px; font-size:12.5px;
+    background:var(--accent-soft); color:var(--ink);
+  }
+  .carryover[hidden]{ display:none }
   .locked{
     display:none; align-items:center; gap:8px;
     border:1px dashed var(--line); border-radius:9px;
@@ -292,6 +298,14 @@
     </div>
 
     <div class="sidebar">
+
+      <div class="carryover" id="carryover" hidden>
+        <div><b>Started empty.</b> What you had open here last time is kept, in case you want it.</div>
+        <div class="grid" style="margin-top:8px">
+          <button class="btn" id="btnCarryOn" title="Put back what was open here when you left, and the file it was saved to">Bring it back</button>
+          <button class="btn" id="btnCarryDrop" title="Forget it and keep the empty transcription">Discard</button>
+        </div>
+      </div>
 
       <div class="locked">
         <b>Practice</b> — the music is locked. Move about, select what to loop, play.
@@ -570,6 +584,7 @@ const DUR_ORDER = ["w","h","q","e","s"];
 const DUR_LABEL = { w:"whole", h:"half", q:"quarter", e:"eighth", s:"16th" };
 
 const LS_KEY = "bass-notation-v1";
+const LS_STASH = "bass-notation-carried-over";   // set aside, not thrown away
 
 // Octave convention for new transcriptions. Saved files keep whatever they
 // recorded, so changing this never rewrites work you already have.
@@ -613,6 +628,59 @@ function isRefSection(){
   return !!(s && s.ref);
 }
 
+function blankSong(){
+  return { version:1, title:"Untitled", artist:"", timeSig:{beats:4,unit:4},
+           naming:"nl", tuning:DEFAULT_TUNING.slice(), tempo:90, showTempo:true,
+           followRepeats:true, barsPerLine:"auto", octaves:DEFAULT_OCTAVES,
+           sections:[newSection("Intro")] };
+}
+
+// What to open with. The copy on the web is where people try the editor and
+// where you come back to open a file; the copy you downloaded is yours, and
+// carries on where you left off. Kept apart from the boot code so it can be
+// checked directly.
+//
+// Carrying on mattered more than it looked: the file you last saved to came
+// back with the scratch copy, so a Save out of habit wrote the scratch over
+// the good file. Hence: start clean, keep the old work aside, and do not take
+// the file back until it is asked for.
+// Is what is in storage actually yours? Every render writes the open song out,
+// so something is nearly always there — an empty staff after you pressed New,
+// or the demo phrase nobody typed. Neither is work, and offering either back
+// would be nonsense.
+function worthKeeping(saved){
+  if (!saved) return false;
+  try {
+    const s = JSON.parse(saved);
+    const notes = (s.sections || []).reduce((n, sec) => n + ((sec.notes || []).length), 0);
+    if (!notes) return false;
+    return saved !== JSON.stringify(demoSong());
+  } catch(e){ return false; }
+}
+
+// A first visit gets the demo phrase — an empty staff is a poor greeting, and
+// there is nothing of yours for it to be confused with. Starting clean only
+// matters once you have actually left something behind.
+function bootPlan(saved, hosted){
+  if (!hosted)
+    return saved ? { open:"saved", stash:null, takeFile:true }
+                 : { open:"demo",  stash:null, takeFile:false };
+  return worthKeeping(saved)
+    ? { open:"blank", stash:saved, takeFile:false }
+    : { open:"demo",  stash:null,  takeFile:false };
+}
+
+// Carrying the plan out. Apart from the boot code so it can be checked without
+// reloading the page.
+function applyBootPlan(plan, saved){
+  if (plan.open === "saved") loadSong(JSON.parse(saved));
+  else if (plan.open === "demo") { song = demoSong(); cursor = { sec:0, i:0 }; selAnchor = null; }
+  else { song = blankSong(); cursor = { sec:0, i:0 }; selAnchor = null; }
+  // Set it aside before anything renders — the first render writes whatever is
+  // open over LS_KEY, so the old work has to be out of the way by then.
+  if (plan.stash) localStorage.setItem(LS_STASH, plan.stash);
+}
+
 function demoSong(){
   const s = newSection("Intro");
   s.notes = [
@@ -627,7 +695,7 @@ function demoSong(){
   ];
   return {
     version: 1,
-    title: "Untitled",
+    title: "Demo",              // named, so it is plainly not a song of yours
     artist: "",
     timeSig: { beats:4, unit:4 },
     naming: "nl",
@@ -4399,12 +4467,41 @@ $("#fTempo").addEventListener("input", e => {
 });
 $("#btnUndo").addEventListener("click", undo);
 $("#btnRedo").addEventListener("click", redo);
+function showCarriedOver(){
+  const el = $("#carryover");
+  if (el) el.hidden = !localStorage.getItem(LS_STASH);
+}
+
+function carryOver(){
+  const kept = localStorage.getItem(LS_STASH);
+  if (!kept) return;
+  try { loadSong(JSON.parse(kept)); }
+  catch(e){ localStorage.removeItem(LS_STASH); showCarriedOver(); return; }
+  localStorage.removeItem(LS_STASH);
+  // the file it was saved to belongs with it
+  recallHandle().then(h => {
+    if (!h) return;
+    fileHandle = h; fileName = h.name; savedText = null;
+    updateFileState();
+  });
+  showCarriedOver();
+}
+
+function dropCarriedOver(){
+  localStorage.removeItem(LS_STASH);
+  showCarriedOver();
+}
+
+$("#btnCarryOn").addEventListener("click", carryOver);
+$("#btnCarryDrop").addEventListener("click", dropCarriedOver);
+
 $("#btnNew").addEventListener("click", () => {
   if (!confirm("Start a new, empty transcription? Save first if you want to keep this one.")) return;
   pushUndo();
   fileHandle = null; fileName = ""; savedText = null;
   rememberHandle(null);
-  song = { version:1, title:"Untitled", artist:"", timeSig:{beats:4,unit:4}, naming:"nl", tuning:DEFAULT_TUNING.slice(), tempo:90, showTempo:true, followRepeats:true, barsPerLine:"auto", octaves:DEFAULT_OCTAVES, sections:[newSection("Intro")] };
+  dropCarriedOver();
+  song = blankSong();
   cursor = { sec:0, i:0 };
   syncFields();
   render();
@@ -4414,25 +4511,31 @@ $("#btnNew").addEventListener("click", () => {
    Boot
    ============================================================ */
 
+const HOSTED = location.protocol === "http:" || location.protocol === "https:";
+let plan = { open:"blank", stash:null, takeFile:false };
+
 try{
-  // Go through loadSong so a restored autosave gets the same field migration
-  // as a file you open by hand.
   const saved = localStorage.getItem(LS_KEY);
-  if (saved) loadSong(JSON.parse(saved));
-}catch(e){ /* keep the starting song */ }
+  plan = bootPlan(saved, HOSTED);
+  applyBootPlan(plan, saved);        // loadSong, so a restored autosave gets
+}catch(e){ /* keep the starting song */ }   // the same migration as a file
 
 loadPrefs();
 
 // Bring back the file this transcription was saved to, if there was one. No
 // permission is asked here — the browser wants a click for that, so it happens
-// on the first save instead.
-recallHandle().then(h => {
-  if (!h) return;
-  fileHandle = h;
-  fileName = h.name;
-  savedText = null;
-  updateFileState();
-});
+// on the first save instead. Skipped when we started clean, or Save would
+// write an empty song over whatever that file holds.
+if (plan.takeFile)
+  recallHandle().then(h => {
+    if (!h) return;
+    fileHandle = h;
+    fileName = h.name;
+    savedText = null;
+    updateFileState();
+  });
+
+showCarriedOver();
 
 syncFields();
 render();
