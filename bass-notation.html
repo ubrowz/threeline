@@ -184,6 +184,8 @@
   .muted{color:var(--ink-2);font-size:12px}
   #saveState{white-space:nowrap;font-variant-numeric:tabular-nums}
   #saveState.dirty{color:#9a6b12;font-weight:600}
+  #btnPanel{display:none}          /* only appears under the narrow breakpoint */
+  .rotatehint{display:none}
   /* a moment of green, so pressing Save is visibly something rather than nothing */
   #saveState.flash{animation:saved 1.4s ease-out}
   @keyframes saved{
@@ -274,6 +276,49 @@
     .system .selbg{fill:#fff}
     @page{margin:16mm 12mm}
   }
+
+  /* ---------- narrow / touch screens: one pane at a time ---------- */
+  /* The sheet or the setup column, swapped by the Setup/Sheet button — the
+     sidebar cannot shrink and the score is drawn at a fixed width, so both
+     showing at once overlap on a phone. Reading mode governs itself, hence the
+     :not(.reading) on every rule that could clash with it. */
+  @media (max-width: 520px),
+         (max-width: 960px) and (orientation: landscape) and (pointer: coarse) {
+
+    html, body, .app{ overflow-x:hidden }
+
+    .topbar{ flex-wrap:wrap; gap:6px; padding:6px 8px }
+    .topbar .brand{ display:none }
+    #btnPanel{ display:inline-block }
+
+    .statusbar{ flex-wrap:wrap }
+    #stHint{ display:none }
+
+    .readbar{ flex-wrap:wrap; justify-content:center; max-width:calc(100vw - 16px) }
+    .readbar .btn{ padding:9px 12px }
+
+    body.narrow:not(.reading) .sidebar{
+      width:auto; flex:1 1 auto; border-left:0; display:none;
+    }
+    body.narrow:not(.reading).panel .sidebar{ display:block }
+    body.narrow:not(.reading).panel .scrollarea{ display:none }
+    /* practice stacks the sidebar so the Playing card can lead — keep that */
+    body.narrow:not(.reading).panel.practice .sidebar{ display:flex; flex-direction:column }
+
+    /* fit the fixed 820px page to the screen (see fitSheet) */
+    body.narrow:not(.reading) .scrollarea{ padding:12px 10px 90px }
+    body.narrow:not(.reading) .page{ zoom:var(--fit-zoom, 1) }
+  }
+
+  /* portrait phone: nudge toward landscape, where the sheet fits full size */
+  @media (max-width: 520px) and (orientation: portrait){
+    .rotatehint{
+      display:block; flex:0 0 auto; text-align:center;
+      font-size:12px; color:var(--ink-2);
+      padding:5px 10px; background:var(--panel);
+      border-bottom:1px solid var(--line);
+    }
+  }
 </style>
 </head>
 <body>
@@ -281,6 +326,7 @@
 
   <div class="topbar">
     <div class="brand">Threeline</div>
+    <button class="btn" id="btnPanel" title="Switch between the sheet and the setup column">Setup</button>
     <button class="btn" id="btnNew" title="Start again with an empty transcription. Save this one first if you want to keep it.">New</button>
     <button class="btn" id="btnOpen" title="Open a .json transcription, or a .mid to turn into a starting draft">Open…</button>
     <button class="btn primary" id="btnSave" title="Save (⌘S)">Save</button>
@@ -307,6 +353,8 @@
     <button class="btn" id="btnRedo" title="Redo (⇧⌘Z)">Redo</button>
     <input type="file" id="fileInput" accept=".json,.mid,.midi,application/json,audio/midi" hidden>
   </div>
+
+  <div class="rotatehint">Rotate your phone for more room</div>
 
   <div class="main">
     <div class="scrollarea" id="scrollarea">
@@ -1842,6 +1890,7 @@ let bassSound = "plain";
 let drumFeel = "off";
 let reading = false, readZoom = 1;
 let practice = false;      // the music is fixed; only moving about and playing
+let panel = false;         // narrow screens: show the setup column instead of the sheet
 const PREF_KEY = "bass-notation-prefs";
 
 function loadPrefs(){
@@ -3131,6 +3180,17 @@ function fitReading(){
   setReadZoom(natural ? (innerWidth - 44) / natural : 1.4);
 }
 
+// The score's systems are drawn at a fixed 820px page, wider than a phone held
+// upright. Shrink the whole page to fit — the reading-mode trick, but its own
+// zoom variable so the two never fight. The page width is constant, so this only
+// re-runs when the viewport changes, never on a re-render.
+function fitSheet(){
+  const room = window.innerWidth - 24;                // .scrollarea padding, both sides
+  const z = room >= 820 ? 1
+          : Math.max(0.35, Math.round(room / 820 * 20) / 20);
+  document.documentElement.style.setProperty("--fit-zoom", z);
+}
+
 function enterReading(){
   if (reading) return;
   reading = true;
@@ -3181,11 +3241,36 @@ function setPractice(on){
 }
 function togglePractice(){ setPractice(!practice); }
 
+// On a phone the sheet and the setup column cannot share the width, so one shows
+// at a time and this swaps them. Session-only, like reading and practice — every
+// reload lands on the sheet.
+const NARROW_MQ = matchMedia(
+  "(max-width: 520px), (max-width: 960px) and (orientation: landscape) and (pointer: coarse)");
+
+function syncNarrow(){
+  document.body.classList.toggle("narrow", NARROW_MQ.matches);
+  if (!NARROW_MQ.matches && panel){ panel = false; document.body.classList.remove("panel"); }
+}
+
+function togglePanel(){
+  panel = !panel;
+  document.body.classList.toggle("panel", panel);
+  if (!panel) fitSheet();          // the screen may have turned while the sheet was hidden
+  updateTransport();
+}
+
+// Turning a phone, dragging the window, or crossing the narrow breakpoint all
+// re-fit whichever view is up.
+function onViewportChange(){
+  syncNarrow();
+  if (reading) fitReading(); else fitSheet();
+}
+window.addEventListener("resize", onViewportChange);
+window.addEventListener("orientationchange", onViewportChange);
+NARROW_MQ.addEventListener("change", onViewportChange);
+
 // Leaving fullscreen by any route — Esc, the browser's own button — leaves
 // reading mode with it, so the two never disagree.
-// Turning a tablet, or dragging the window, re-fits it.
-window.addEventListener("resize", () => { if (reading) fitReading(); });
-
 document.addEventListener("fullscreenchange", () => {
   if (!document.fullscreenElement && reading) leaveReading();
 });
@@ -3254,6 +3339,11 @@ function updateTransport(){
   if (pb){
     pb.classList.toggle("on", practice);
     pb.textContent = practice ? "Practising" : "Practice";
+  }
+  const pp = $("#btnPanel");
+  if (pp){
+    pp.classList.toggle("on", panel);
+    pp.textContent = panel ? "Sheet" : "Setup";
   }
 }
 
@@ -4850,6 +4940,7 @@ $("#btnPrint").addEventListener("click", () => { stopPlayback(); window.print();
 $("#btnPlay").addEventListener("click", togglePlayback);
 $("#btnFull").addEventListener("click", toggleReading);
 $("#btnPractice").addEventListener("click", togglePractice);
+$("#btnPanel").addEventListener("click", togglePanel);
 $("#btnMidi").addEventListener("click", exportMidi);
 $("#rExit").addEventListener("click", leaveReading);
 $("#rPlay").addEventListener("click", togglePlayback);
@@ -4991,6 +5082,8 @@ showCarriedOver();
 
 syncFields();
 render();
+syncNarrow();
+fitSheet();
 updateTransport();
 </script>
 </body>
