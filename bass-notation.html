@@ -285,7 +285,7 @@
   @media (max-width: 520px),
          (max-width: 960px) and (orientation: landscape) and (pointer: coarse) {
 
-    html, body, .app{ overflow-x:hidden }
+    html, body, .app{ overflow-x:hidden; height:100dvh }
 
     .topbar{ flex-wrap:wrap; gap:6px; padding:6px 8px }
     .topbar .brand{ display:none }
@@ -294,8 +294,20 @@
     .statusbar{ flex-wrap:wrap }
     #stHint{ display:none }
 
-    .readbar{ flex-wrap:wrap; justify-content:center; max-width:calc(100vw - 16px) }
-    .readbar .btn{ padding:9px 12px }
+    /* Full-screen mode on a phone: dock the transport as a bottom bar, not a
+       floating pill — the pill re-wraps when Play becomes Stop, and with iOS
+       Safari's toolbar collapsing on scroll it drifts up over the score. In the
+       flow it takes its own row and nothing can cover it. */
+    body.reading .readbar{
+      position:static; transform:none; max-width:none; width:100%;
+      flex:0 0 auto; flex-wrap:nowrap; justify-content:center; gap:6px;
+      border-radius:0; border-width:1px 0 0; box-shadow:none;
+      padding:8px 10px;
+    }
+    body.reading .readbar .btn{ padding:8px 10px }
+    body.reading .readbar > span:not([id]){ display:none }  /* the 4px spacers; #rZoom kept */
+    body.reading .scrollarea{ padding:14px 12px 14px }      /* bar is in flow now */
+    body.reading .rotatehint{ display:none }                /* reading mode drops all other chrome too */
 
     body.narrow:not(.reading) .sidebar{
       width:auto; flex:1 1 auto; border-left:0; display:none;
