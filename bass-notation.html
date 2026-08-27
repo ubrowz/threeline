@@ -120,7 +120,11 @@
   body.practice .card--edit{ display:none }
   body.practice .secitem .mini{ display:none }   /* rename, reorder, delete */
   body.practice .sectionhead{ border-color:transparent; cursor:default }
-  body.practice .locked{ display:flex }
+  /* practice is for playing: stack the sidebar so the Playing card can lead */
+  body.practice .sidebar{ display:flex; flex-direction:column }
+  body.practice #notice, body.practice #carryover{ order:-3 }
+  body.practice .locked{ display:flex; order:-2 }
+  body.practice .card--play{ order:-1 }
   .carryover{
     border:1px solid var(--accent); border-radius:9px;
     padding:10px 11px; margin-bottom:12px; font-size:12.5px;
@@ -428,7 +432,7 @@
         <div class="muted" style="margin-top:7px">A reference shows just its name — use it for a chorus or verse that repeats an earlier one. <b>R</b> turns any section into one; its notes are kept, only hidden.</div>
       </div>
 
-      <div class="card">
+      <div class="card card--play">
         <h3>Playing</h3>
         <div class="row"><label>Speed</label>
           <select class="fld" id="fRate" title="Play it slower than written, to work a passage up to speed. The click slows with it.">
