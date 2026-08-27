@@ -49,6 +49,7 @@
   .brand{font-weight:650;letter-spacing:-.01em;margin-right:6px;white-space:nowrap}
   .brand span{color:var(--ink-2);font-weight:400}
   .spacer{flex:1}
+  .topbar .sep{width:1px;align-self:stretch;margin:4px 3px;background:var(--line);flex:0 0 auto}
   .btn{
     border:1px solid var(--line);background:var(--panel);border-radius:7px;
     padding:5px 11px;cursor:pointer;white-space:nowrap;
@@ -280,11 +281,11 @@
     <button class="btn" id="btnOpen" title="Open a .json transcription, or a .mid to turn into a starting draft">Open…</button>
     <button class="btn primary" id="btnSave" title="Save (⌘S)">Save</button>
     <button class="btn" id="btnSaveAs" title="Save to a new file (⇧⌘S)">Save as…</button>
-    <button class="btn" id="btnPractice" title="Lock the music so it cannot be changed by accident while you play along. Moving about, choosing what to loop and playing all still work. (⇧P)">Practice</button>
-    <button class="btn" id="btnFull" title="Hide the editor and show only the music, large enough to read from a stand (f)">Full screen</button>
     <button class="btn" id="btnMidi" title="Write the line out as a MIDI file, for GarageBand or any DAW. Pitch and rhythm travel; the string and fret cannot, because MIDI has no word for them.">MIDI</button>
     <button class="btn" id="btnPrint" title="Print, or save as a PDF. Only the music is printed — none of the editor.">Print / PDF</button>
-    <span style="width:10px"></span>
+    <span class="sep"></span>
+    <button class="btn" id="btnPractice" title="Lock the music so it cannot be changed by accident while you play along. Moving about, choosing what to loop and playing all still work. (⇧P)">Practice</button>
+    <button class="btn" id="btnFull" title="Hide the editor and show only the music, large enough to read from a stand (f)">Full screen</button>
     <button class="btn" id="btnPlay" title="Play from the selected note, or play the selection (⌘↵)">Play</button>
     <button class="btn" id="btnLoop" title="Repeat what you are playing until you stop (⌘L)">Loop</button>
     <select class="btn" id="fRateHidden" hidden>
