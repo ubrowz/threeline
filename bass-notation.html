@@ -1914,6 +1914,24 @@ function ac(){
   return audioCtx;
 }
 
+// A phone hands back a suspended AudioContext that only a real gesture may
+// start, and iOS mutes WebAudio-only output on the ringer switch unless the
+// session is marked "playback". Do both on the first touch or key press, and
+// nudge it with a silent buffer the way older iOS needs.
+function unlockAudio(){
+  try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch(e){}
+  const ctx = ac();
+  if (ctx.state === "suspended") ctx.resume().catch(() => {});
+  try {
+    const s = ctx.createBufferSource();
+    s.buffer = ctx.createBuffer(1, 1, 22050);
+    s.connect(ctx.destination);
+    s.start(0);
+  } catch(e){}
+}
+["pointerdown", "touchend", "keydown"].forEach(t =>
+  document.addEventListener(t, unlockAudio, { once: true, passive: true }));
+
 function isPlaying(){ return !!play; }
 
 // Every note in playing order, reference sections skipped and repeats expanded:
@@ -3036,7 +3054,13 @@ function startPlayback(){
   if (!range) return;
 
   const ctx = ac();
-  if (ctx.state === "suspended") ctx.resume();
+  // A phone's context runs its clock only once resume() has resolved. Schedule
+  // against a still-suspended one and every note is already in the past, so
+  // nothing sounds — wait for it to be running, then start for real.
+  if (ctx.state !== "running"){
+    ctx.resume().then(() => { if (!play) startPlayback(); }, () => {});
+    return;
+  }
 
   const plan = buildPlan(range[0], range[1]);
   if (!plan.steps.length) return;
