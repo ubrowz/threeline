@@ -2910,10 +2910,17 @@ function scrollAhead(el){
   area.scrollTo({ top: Math.max(0, Math.min(target, most)), behavior: "smooth" });
 }
 
+// The system element a step sits in, if it is on the page.
+function stepEl(step){
+  return step
+    ? document.querySelector(`.system .hit[data-sec="${step.si}"][data-i="${step.i}"]`)
+    : null;
+}
+
 function highlightPlaying(step){
   document.querySelectorAll(".system .hit.playing").forEach(e => e.classList.remove("playing"));
   if (!step){ turnedTo = null; return; }
-  const el = document.querySelector(`.system .hit[data-sec="${step.si}"][data-i="${step.i}"]`);
+  const el = stepEl(step);
   if (el){
     el.classList.add("playing");
     scrollAhead(el);
@@ -3044,7 +3051,16 @@ function followPlayhead(){
   const cycle = (loopOn && period > 0) ? Math.floor(elapsed / period) : 0;
   const j = stepAt(st.plan, elapsed, loopOn, st.gap);
   if (j < 0){
-    if (st.shown !== -1){ st.shown = -1; highlightPlaying(null); }
+    if (st.shown !== -1){
+      st.shown = -1;
+      highlightPlaying(null);
+      // A count-in between repeats is sounding: take the page back to the
+      // loop's start now, so the first bar is in view before the music returns.
+      if (loopOn && elapsed > 0){
+        const back = stepEl(st.plan.steps[0]);
+        if (back) scrollAhead(back);
+      }
+    }
   } else if (j !== st.shown || cycle !== st.shownCycle){
     st.shown = j;
     st.shownCycle = cycle;
