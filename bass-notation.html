@@ -460,7 +460,8 @@
           </select>
         </div>
         <div class="row"><label>Sound</label>
-          <select class="fld" id="fSound" title="Which bass it sounds like. Where a pickup sits along the string is what changes the tone.">
+          <select class="fld" id="fSound" title="Which bass it sounds like. Where a pickup sits along the string is what changes the tone. Off silences the bass — with Click on, that is a plain metronome.">
+            <option value="off">off</option>
             <option value="plain">plain</option>
             <option value="p">P-style</option>
             <option value="j">J-style</option>
@@ -2586,6 +2587,7 @@ function drumVoice(ctx, when, note, vel, out){
 }
 
 function sound(ctx, when, ev, out){
+  if (bassSound === "off") return;          // the click carries the beat on its own
   if (ev.dead) deadVoice(ctx, when, out);
   else voice(ctx, when, ev.dur, ev.midi, out, ev);
 }
@@ -2601,6 +2603,9 @@ function sound(ctx, when, ev, out){
 // each has the resonant lift a real, inductive pickup has — lower and broader
 // on a P, higher and narrower on a J.
 const PICKUPS = {
+  // no bass at all — sound() stops before it plays a note, so with the click
+  // on this is a plain metronome. Null here also means "colour nothing".
+  off: null,
   plain: null,
   // one pickup, well along the string, and a broad lift low down: round, with
   // the top rolled off early
