@@ -2921,11 +2921,14 @@ function highlightPlaying(step){
 }
 
 // Which events fall inside [now, horizon)? Advances `state` and wraps round
-// when looping. Kept pure so the loop maths can be checked without real time.
-function windowEvents(plan, t0, state, now, horizon, loop){
+// when looping. `gap` is the silence held before every repeat for the count-in,
+// so one cycle is `total + gap` long. Kept pure so the loop maths can be
+// checked without real time.
+function windowEvents(plan, t0, state, now, horizon, loop, gap){
   const out = [];
   const { events, total } = plan;
   if (!events.length || total <= 0) return out;
+  const period = total + (gap || 0);
   let guard = 0;
   while (guard++ < 4000){
     if (state.k >= events.length){
@@ -2934,7 +2937,7 @@ function windowEvents(plan, t0, state, now, horizon, loop){
       state.k = 0;
     }
     const ev = events[state.k];
-    const when = t0 + state.cycle * total + ev.t;
+    const when = t0 + state.cycle * period + ev.t;
     if (when >= horizon) break;
     if (when >= now - 0.5) out.push({ when, ev });
     state.k++;
@@ -2942,12 +2945,17 @@ function windowEvents(plan, t0, state, now, horizon, loop){
   return out;
 }
 
-// Which step is sounding at `elapsed` seconds in?
-function stepAt(plan, elapsed, loop){
+// Which step is sounding at `elapsed` seconds in? During a looped count-in the
+// music has not come back round yet, so nothing is playing: that reads as -1.
+function stepAt(plan, elapsed, loop, gap){
   const { steps, total } = plan;
   if (!steps.length || elapsed < 0) return -1;
   let t = elapsed;
-  if (loop && total > 0) t = t - Math.floor(t / total) * total;
+  if (loop && total > 0){
+    const period = total + (gap || 0);
+    t = t - Math.floor(t / period) * period;
+    if (t >= total) return -1;
+  }
   else if (t >= total) return steps.length - 1;
   let j = 0;
   for (let i = 0; i < steps.length; i++){
@@ -2971,19 +2979,21 @@ function startPlayback(){
   master.gain.setValueAtTime(1, ctx.currentTime);
   master.connect(ctx.destination);
 
-  // The count-in sits before the music rather than inside it, so the plan,
-  // the loop and the playhead all still start at zero.
+  // The count-in sits before the music rather than inside it, so the plan and
+  // the playhead still start at zero; when looping, `gap` holds that same bar
+  // of silence before every repeat and pump() fills it with clicks.
   const lead = countInOn ? countIn(range[0]) : null;
-  const t0 = ctx.currentTime + 0.12 + (lead ? lead.dur : 0);
+  const gap = lead ? lead.dur : 0;
+  const t0 = ctx.currentTime + 0.12 + gap;
   if (lead)
-    for (const c of lead.clicks) click(ctx, t0 - lead.dur + c.t, c.down, master);
+    for (const c of lead.clicks) click(ctx, t0 - gap + c.t, c.down, master);
 
   const spb = 60 / ((song.tempo || 90) * playRate);
-  play = { ctx, master, plan, t0,
+  play = { ctx, master, plan, t0, lead, gap,
            clicks: metroOn ? beatTrack(range[0], range[1], plan.total) : [],
            drums: drumTrack(range[0], range[1], plan.total, spb),
            sched: { k: 0, cycle: 0 }, clickSched: { k: 0, cycle: 0 },
-           drumSched: { k: 0, cycle: 0 },
+           drumSched: { k: 0, cycle: 0 }, countInCycle: 1,
            shown: -1, shownCycle: -1 };
   playTimer = setInterval(pump, 25);
   requestAnimationFrame(followPlayhead);
@@ -2996,19 +3006,31 @@ function pump(){
   const st = play;
   if (!st) return;
   const now = st.ctx.currentTime;
-  for (const { when, ev } of windowEvents(st.plan, st.t0, st.sched, now, now + 0.2, loopOn))
+  const horizon = now + 0.2;
+  for (const { when, ev } of windowEvents(st.plan, st.t0, st.sched, now, horizon, loopOn, st.gap))
     sound(st.ctx, when, ev, st.master);
 
   if (st.drums.length)
     for (const { when, ev } of windowEvents({ events: st.drums, total: st.plan.total },
-                                            st.t0, st.drumSched, now, now + 0.2, loopOn))
+                                            st.t0, st.drumSched, now, horizon, loopOn, st.gap))
       drumVoice(st.ctx, when, ev.note, ev.vel, st.master);
 
-  // the beat track loops with the music, but the count-in never repeats
+  // The beat track loops with the music, keeping clear of the count-in gap.
   if (st.clicks.length)
     for (const { when, ev } of windowEvents({ events: st.clicks, total: st.plan.total },
-                                            st.t0, st.clickSched, now, now + 0.2, loopOn))
+                                            st.t0, st.clickSched, now, horizon, loopOn, st.gap))
       click(st.ctx, when, ev.down, st.master);
+
+  // The first count-in sits before t0; when looping, another one fills the gap
+  // ahead of every repeat, landing right where the music comes back round.
+  if (st.lead && loopOn){
+    const period = st.plan.total + st.gap;
+    while (st.t0 + st.countInCycle * period - st.gap < horizon){
+      const base = st.t0 + st.countInCycle * period - st.gap;
+      for (const c of st.lead.clicks) click(st.ctx, base + c.t, c.down, st.master);
+      st.countInCycle++;
+    }
+  }
 
   if (!loopOn && st.sched.k >= st.plan.events.length &&
       now > st.t0 + st.plan.total + 0.2) stopPlayback();
@@ -3018,9 +3040,12 @@ function followPlayhead(){
   const st = play;
   if (!st) return;
   const elapsed = st.ctx.currentTime - st.t0;
-  const cycle = (loopOn && st.plan.total > 0) ? Math.floor(elapsed / st.plan.total) : 0;
-  const j = stepAt(st.plan, elapsed, loopOn);
-  if (j >= 0 && (j !== st.shown || cycle !== st.shownCycle)){
+  const period = st.plan.total + st.gap;
+  const cycle = (loopOn && period > 0) ? Math.floor(elapsed / period) : 0;
+  const j = stepAt(st.plan, elapsed, loopOn, st.gap);
+  if (j < 0){
+    if (st.shown !== -1){ st.shown = -1; highlightPlaying(null); }
+  } else if (j !== st.shown || cycle !== st.shownCycle){
     st.shown = j;
     st.shownCycle = cycle;
     highlightPlaying(st.plan.steps[j]);
