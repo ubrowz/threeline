@@ -2024,14 +2024,21 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
       const prev = notes[it.i - 1];
       if (prev && !pos.has(it.i - 1) && (prev.tie || prev.link)){
         const from = Math.max(inset, cx - 26);
-        s += `<path d="M${from},${y+6} Q${(from+cx)/2},${y+13} ${cx},${y+6}" stroke="#2a2e35" `
-           + `stroke-width="${prev.tie ? 1.15 : 0.95}" fill="none"${prev.tie ? "" : ` opacity="0.7"`}/>`;
+        s += `<path d="M${from},${y-4} Q${(from+cx)/2},${y-11} ${cx-3},${y-4}" stroke="#2a2e35" `
+           + `stroke-width="${prev.tie ? 1.1 : 0.95}" fill="none"${prev.tie ? "" : ` opacity="0.7"`}/>`;
       }
+      // A tie hugs the two noteheads. Between different pitches — which this model
+      // allows — it acts as a slur, slanting to connect them.
       if (n.tie){
         const x2 = nextX();
         if (x2 !== null){
-          const yb = y + (down ? -6 : 6), depth = down ? -7 : 7;
-          s += `<path d="M${cx},${yb} Q${(cx+x2)/2},${yb + depth} ${x2},${yb}" stroke="#2a2e35" stroke-width="1.15" fill="none"/>`;
+          const y2t  = P.get(it.i + 1) ? P.get(it.i + 1).y : y;
+          const same = Math.abs(y2t - y) < 0.5;
+          const off  = down ? -4 : 4;                   // sit on the notehead side
+          const a = y + off, b = (same ? y : y2t) + off;
+          const bow = (down ? -1 : 1) * (same ? 4 : 7);
+          s += `<path d="M${cx + 3},${a} Q${(cx + x2) / 2},${(a + b) / 2 + bow} ${x2 - 3},${b}" `
+             + `stroke="#2a2e35" stroke-width="1.1" fill="none"/>`;
         }
       }
       const link = notes[it.i + 1];
