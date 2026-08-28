@@ -1326,21 +1326,14 @@ function svgFlagDown2(x, y){
   return svgFlagDown(x, y) + svgFlagDown(x, y - 6);
 }
 
-// A bass (F) clef, filled — a fat comma curling off the F line with two dots to
-// its right. `yF` is the F line (2nd from the top of the staff). `s` = one space.
+// A real bass-clef outline — public domain, Wikimedia "Bass clef.svg" — scaled
+// so its F line lands on `yF` and its staff spacing matches ST_GAP.
+const _CLEF_PATH = "M 1239,8245 C 1397,8138 1515,8057 1591,8001 C 1667,7946 1747,7877 1829,7795 C 1911,7713 1980,7620 2036,7517 C 2080,7441 2118,7353 2149,7253 C 2180,7154 2196,7058 2199,6967 C 2199,6882 2188,6801 2165,6725 C 2143,6648 2105,6585 2051,6534 C 1997,6484 1927,6459 1840,6459 C 1756,6459 1677,6476 1603,6509 C 1530,6543 1478,6597 1449,6673 C 1449,6680 1445,6689 1439,6702 C 1441,6718 1449,6730 1464,6739 C 1479,6748 1492,6752 1504,6752 C 1510,6752 1527,6749 1553,6743 C 1580,6737 1602,6733 1620,6733 C 1673,6733 1720,6752 1763,6789 C 1805,6826 1826,6871 1826,6924 C 1826,6962 1815,6998 1794,7031 C 1773,7064 1744,7091 1707,7110 C 1670,7130 1629,7139 1585,7139 C 1505,7139 1437,7115 1381,7066 C 1326,7016 1298,6953 1298,6874 C 1298,6773 1329,6686 1390,6612 C 1452,6538 1530,6483 1626,6446 C 1721,6408 1817,6390 1915,6390 C 2022,6390 2124,6417 2219,6472 C 2315,6526 2390,6601 2446,6694 C 2502,6788 2531,6888 2531,6996 C 2531,7188 2467,7366 2339,7531 C 2211,7696 2053,7839 1864,7961 C 1738,8044 1534,8156 1253,8297 L 1239,8245 z M 2628,6698 C 2628,6662 2641,6632 2667,6608 C 2692,6583 2723,6571 2760,6571 C 2792,6571 2822,6585 2849,6612 C 2876,6638 2889,6669 2889,6703 C 2889,6739 2875,6770 2849,6795 C 2821,6819 2790,6831 2755,6831 C 2718,6831 2688,6819 2664,6792 C 2640,6766 2628,6735 2628,6698 z M 2628,7222 C 2628,7186 2641,7155 2665,7131 C 2690,7106 2721,7094 2760,7094 C 2792,7094 2821,7107 2849,7134 C 2875,7161 2889,7190 2889,7222 C 2889,7261 2876,7292 2851,7317 C 2825,7342 2795,7355 2760,7355 C 2721,7355 2690,7342 2665,7318 C 2641,7294 2628,7262 2628,7222 z";
 function bassClef(x, yF){
-  const s = ST_GAP;
-  const P = (dx, dy) => `${(x + dx*s).toFixed(2)},${(yF + dy*s).toFixed(2)}`;
-  return `<path d="M ${P(-0.1,-0.3)} `
-       + `C ${P(-0.1,-1.45)} ${P(1.5,-1.95)} ${P(2.5,-1.4)} `
-       + `C ${P(3.45,-0.9)} ${P(3.45,0.65)} ${P(2.9,1.75)} `
-       + `C ${P(2.3,3.25)} ${P(0.7,4.05)} ${P(-1.15,4.35)} `
-       + `C ${P(0.2,3.7)} ${P(1.7,2.7)} ${P(1.95,1.1)} `
-       + `C ${P(2.1,0.2)} ${P(1.7,-0.6)} ${P(1.0,-0.78)} `
-       + `C ${P(0.35,-0.93)} ${P(-0.1,-0.7)} ${P(-0.1,-0.3)} Z" `
-       + `fill="#2a2e35"/>`
-       + `<circle cx="${x + s*3.35}" cy="${yF - s*0.55}" r="${s*0.33}" fill="#2a2e35"/>`
-       + `<circle cx="${x + s*3.35}" cy="${yF + s*0.55}" r="${s*0.33}" fill="#2a2e35"/>`;
+  const K = ST_GAP / 590.5;               // source staff-line spacing
+  const tx = x - K * 1239, ty = yF - K * 6968;   // 1239 = clef left edge, 6968 = F line
+  return `<g transform="translate(${tx.toFixed(3)} ${ty.toFixed(3)}) scale(${K.toFixed(6)})">`
+       + `<path fill="#2a2e35" fill-rule="evenodd" d="${_CLEF_PATH}"/></g>`;
 }
 
 // ♯ ♭ ♮ — centred on (x, y), about one space tall.
@@ -1834,8 +1827,8 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
 
   // Clef + key signature take a left gutter layoutSection knows nothing about;
   // compress the laid-out note area into the rest with an affine map.
-  const ks = drawKeySig(fifths, 34);
-  const inset = 30 + ks.w;
+  const ks = drawKeySig(fifths, 36);
+  const inset = 34 + ks.w;
   const xScale = Math.min(1, (W - 4 - inset - 6) / Math.max(1, sys.width));
   const mapX = x => inset + x * xScale;
 
