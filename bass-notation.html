@@ -1087,7 +1087,6 @@ const ST_STEP  = ST_GAP / 2;              // one diatonic step (line → space)
 const ST_TOP   = 40;                      // y of the top staff line, body coords
 const ST_BOT   = ST_TOP + 4 * ST_GAP;     // bottom staff line
 const ST_MID   = ST_TOP + 2 * ST_GAP;     // middle line — D3 (MIDI 50)
-const ST_LEDGER_BELOW = 64;               // headroom for ledger lines under the staff
 const ST_HEAD_DX = 4.2;                   // notehead centre → stem
 const ST_STEM    = 22;                    // nominal stem length (~2.75 staff spaces)
 
@@ -1824,17 +1823,33 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
   const voltaBand = showEnds   ? VOLTA_BAND : 0;
   const top = voltaBand + chordBand + tupBand;
 
+  const fifths = keyFifths();
+  const tab = keySpell(fifths);
+
+  // How far below the staff this system actually reaches — the lowest notehead
+  // or ledger line anyone plays. The expression and lyric rows hang just under
+  // that, so they read as part of *this* staff and not the one below. A fixed
+  // reserve put them a ledger-full of empty space away and they looked adrift.
+  let lowY = ST_BOT + ST_GAP;
+  for (const m of sys.measures) for (const it of m.items){
+    const n = notes[it.i];
+    if (!n || n.rest || n.dead) continue;
+    let mi = midiOf(n);
+    if (isTiedInto(notes, it.i)){ let j = it.i; while (j > 0 && isTiedInto(notes, j)) j--; mi = midiOf(notes[j]); }
+    const sp = staffPos(mi + 12, fifths, tab, new Map(), false);
+    lowY = Math.max(lowY, sp.y + 6, ...sp.ledgers);
+  }
+
   const drop   = showExpr ? EXPR_H : 0;
-  const exprY  = ST_BOT + ST_LEDGER_BELOW - 6;
-  const lyricY = ST_BOT + ST_LEDGER_BELOW + drop + 14;
-  const bodyH  = (showLyrics ? lyricY + 8 : ST_BOT + ST_LEDGER_BELOW + drop + 10);
+  const exprY  = lowY + 16;
+  const lyricY = lowY + drop + (showExpr ? 30 : 16);
+  let bodyH = lowY + 14;
+  if (showExpr)   bodyH = Math.max(bodyH, exprY + 6);
+  if (showLyrics) bodyH = Math.max(bodyH, lyricY + 6);
   const H = bodyH + top;
   const selY = top ? 2 - top : 6;
   const selH = (bodyH - 6) - selY;
   const W = CONTENT_W + 4;
-
-  const fifths = keyFifths();
-  const tab = keySpell(fifths);
 
   // Clef + key signature take a left gutter layoutSection knows nothing about;
   // compress the laid-out note area into the rest with an affine map.
