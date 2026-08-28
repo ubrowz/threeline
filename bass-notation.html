@@ -2579,8 +2579,11 @@ function playRange(){
   return [start < 0 ? 0 : start, tl.length - 1];
 }
 
-// A plucked bass: sawtooth through a closing lowpass. The fundamental of a low
-// E is ~41Hz and inaudible on a laptop speaker, so the harmonics carry the pitch.
+// A plucked electric bass. The fundamental of a low E is ~41Hz and inaudible on
+// a laptop speaker, so the harmonics carry the pitch — but a sawtooth keeps
+// energy all the way up and buzzes. This wave is a string's: a strong
+// fundamental with the partials rolling off fast. Built once; Web Audio scales
+// the partials with the oscillator's pitch.
 let noiseCache = null;
 function noiseBuffer(ctx){
   if (noiseCache && noiseCache.sampleRate === ctx.sampleRate) return noiseCache;
@@ -2589,6 +2592,17 @@ function noiseBuffer(ctx){
   const d = b.getChannelData(0);
   for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
   return (noiseCache = b);
+}
+
+let bassWaveCache = null;
+function bassWave(ctx){
+  if (bassWaveCache && bassWaveCache.ctx === ctx) return bassWaveCache.wave;
+  const imag = new Float32Array([0,
+    1.00, 0.60, 0.42, 0.30, 0.22, 0.15, 0.10, 0.060, 0.035,
+    0.020, 0.011, 0.006, 0.0032, 0.0018, 0.0010]);
+  const wave = ctx.createPeriodicWave(new Float32Array(imag.length), imag);
+  bassWaveCache = { ctx, wave };
+  return wave;
 }
 
 // A ghost note: a short filtered thud with no pitch.
@@ -2747,30 +2761,68 @@ function pickup(ctx, f, dest){
 
 function voice(ctx, when, dur, midi, out, art){
   const f = 440 * Math.pow(2, (midi - 69) / 12);
-  const osc = ctx.createOscillator();
-  osc.type = "sawtooth";
+  const soft = !!(art && art.soft);
   // a slide starts on the previous pitch and glides up or down into this one
   const from = art && art.from ? 440 * Math.pow(2, (art.from - 69) / 12) : null;
-  osc.frequency.setValueAtTime(from || f, when);
-  if (from) osc.frequency.linearRampToValueAtTime(f, when + Math.min(0.11, dur * 0.5));
+
+  // The string's body, and a clean sine a hair sharp under it for weight on
+  // headphones — offset so the two never sit still against each other.
+  const osc = ctx.createOscillator();
+  osc.setPeriodicWave(bassWave(ctx));
+  osc.detune.value = (Math.random() * 2 - 1) * 5;   // no two notes exactly in tune
+  const sub = ctx.createOscillator();
+  sub.type = "sine";
+  sub.detune.value = 9;
+
+  if (from){
+    osc.frequency.setValueAtTime(from, when);
+    osc.frequency.linearRampToValueAtTime(f, when + Math.min(0.11, dur * 0.5));
+    sub.frequency.setValueAtTime(from, when);
+    sub.frequency.linearRampToValueAtTime(f, when + Math.min(0.11, dur * 0.5));
+  } else {
+    // a real string starts a touch sharp and settles as it is let go
+    if (!soft){
+      osc.frequency.setValueAtTime(f * 1.007, when);
+      osc.frequency.exponentialRampToValueAtTime(f, when + 0.03);
+    } else {
+      osc.frequency.setValueAtTime(f, when);
+    }
+    sub.frequency.setValueAtTime(f, when);
+  }
 
   const lp = ctx.createBiquadFilter();
   lp.type = "lowpass";
-  lp.Q.setValueAtTime(2.5, when);
-  lp.frequency.setValueAtTime(Math.min(5000, f * 16), when);
-  lp.frequency.exponentialRampToValueAtTime(Math.max(200, f * 2.5), when + Math.min(dur, 0.45));
+  lp.Q.setValueAtTime(0.7, when);
+  // wide enough that a low string still speaks; closes toward the body over the note
+  lp.frequency.setValueAtTime(Math.min(4000, Math.max(1200, f * 12)), when);
+  lp.frequency.exponentialRampToValueAtTime(Math.max(520, f * 3.2), when + Math.min(dur, 0.5));
+
+  // A fixed instrument body: warmth down low, and a dip in the low mids so it
+  // does not honk. The same colour whatever the pitch.
+  const bodyLow = ctx.createBiquadFilter();
+  bodyLow.type = "lowshelf"; bodyLow.frequency.value = 140; bodyLow.gain.value = 1.5;
+  const bodyMid = ctx.createBiquadFilter();
+  bodyMid.type = "peaking"; bodyMid.frequency.value = 450;
+  bodyMid.Q.value = 1.0; bodyMid.gain.value = -2.5;
 
   const len = Math.max(0.09, dur * 0.92);
   // hammered, pulled or slid notes are not plucked, so they speak more quietly
-  const peak = (art && art.soft) ? 0.16 : 0.28;
+  const peak = soft ? 0.10 : 0.17;
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.0001, when);
-  g.gain.exponentialRampToValueAtTime(peak, when + (art && art.soft ? 0.018 : 0.006));
+  g.gain.exponentialRampToValueAtTime(peak, when + (soft ? 0.018 : 0.006) + Math.random() * 0.003);
   g.gain.exponentialRampToValueAtTime(0.0001, when + len);
 
-  osc.connect(lp); lp.connect(pickup(ctx, f, g)); g.connect(out);
-  osc.start(when);
-  osc.stop(when + len + 0.05);
+  const subGain = ctx.createGain();
+  subGain.gain.value = 0.15;
+
+  osc.connect(lp);
+  lp.connect(bodyLow); bodyLow.connect(bodyMid);
+  bodyMid.connect(pickup(ctx, f, g));      // pickup builds its chain into g
+  sub.connect(subGain); subGain.connect(g);
+  g.connect(out);
+  osc.start(when); sub.start(when);
+  osc.stop(when + len + 0.05); sub.stop(when + len + 0.05);
 }
 
 // How much of the view is kept clear below the line being played, so there is
@@ -3081,7 +3133,15 @@ function startPlayback(){
 
   const master = ctx.createGain();
   master.gain.setValueAtTime(1, ctx.currentTime);
-  master.connect(ctx.destination);
+  // Gentle glue on the warmer voice's added low end, then a brick-wall guard so a
+  // dense chord can never clip.
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -14; comp.knee.value = 24; comp.ratio.value = 3;
+  comp.attack.value = 0.006; comp.release.value = 0.16;
+  const lim = ctx.createDynamicsCompressor();
+  lim.threshold.value = -2; lim.knee.value = 0; lim.ratio.value = 20;
+  lim.attack.value = 0.002; lim.release.value = 0.08;
+  master.connect(comp); comp.connect(lim); lim.connect(ctx.destination);
 
   // The count-in sits before the music rather than inside it, so the plan and
   // the playhead still start at zero; when looping, `gap` holds that same bar
@@ -3093,7 +3153,7 @@ function startPlayback(){
     for (const c of lead.clicks) click(ctx, t0 - gap + c.t, c.down, master);
 
   const spb = 60 / ((song.tempo || 90) * playRate);
-  play = { ctx, master, plan, t0, lead, gap,
+  play = { ctx, master, comp, lim, plan, t0, lead, gap,
            clicks: metroOn ? beatTrack(range[0], range[1], plan.total) : [],
            drums: drumTrack(range[0], range[1], plan.total, spb),
            sched: { k: 0, cycle: 0 }, clickSched: { k: 0, cycle: 0 },
@@ -3169,13 +3229,17 @@ function followPlayhead(){
 function stopPlayback(){
   if (playTimer){ clearInterval(playTimer); playTimer = null; }
   if (play){
-    const { ctx, master } = play;
+    const { ctx, master, comp, lim } = play;
     try {
       const t = ctx.currentTime;
       master.gain.cancelScheduledValues(t);
       master.gain.setValueAtTime(master.gain.value, t);
       master.gain.linearRampToValueAtTime(0, t + 0.03);
-      setTimeout(() => { try { master.disconnect(); } catch(e){} }, 120);
+      setTimeout(() => {
+        try { master.disconnect(); } catch(e){}
+        try { comp.disconnect(); } catch(e){}
+        try { lim.disconnect(); } catch(e){}
+      }, 120);
     } catch(e){ /* context already gone */ }
   }
   play = null;

@@ -302,7 +302,7 @@
       </p>
       <div class="actions rise">
         <a class="btn" href="bass-notation.html">Open the editor</a>
-        <a class="btn ghost" href="bass-notation.html" download>Download · 203 KB</a>
+        <a class="btn ghost" href="bass-notation.html" download>Download · 207 KB</a>
       </div>
       <p class="note rise" style="margin-top:16px;max-width:46ch">
         Open it to use it here and now. Download it to keep your own copy, which
@@ -542,7 +542,7 @@
 (function(){
   var PLAN = {"events":[{"t":0,"d":0.625,"m":33,"x":0,"s":0,"f":0,"i":0},{"t":0.625,"d":0.3125,"m":33,"x":1,"s":0,"f":0,"i":1},{"t":0.9375,"d":0.3125,"m":33,"x":0,"s":0,"f":0,"i":2},{"t":1.25,"d":0.2083,"m":33,"x":0,"s":0,"f":0,"i":3},{"t":1.4583,"d":0.2083,"m":35,"x":0,"s":0,"f":0,"i":4},{"t":1.6667,"d":0.2083,"m":36,"x":0,"s":0,"f":0,"i":5},{"t":2.1875,"d":0.3125,"m":35,"x":0,"s":0,"f":0,"i":7},{"t":2.5,"d":0.9375,"m":36,"x":0,"s":1,"f":35,"i":8},{"t":3.4375,"d":0.3125,"m":38,"x":0,"s":0,"f":0,"i":9},{"t":3.75,"d":1.25,"m":40,"x":0,"s":1,"f":0,"i":10},{"t":5,"d":0.625,"m":33,"x":0,"s":0,"f":0,"i":0},{"t":5.625,"d":0.3125,"m":33,"x":1,"s":0,"f":0,"i":1},{"t":5.9375,"d":0.3125,"m":33,"x":0,"s":0,"f":0,"i":2},{"t":6.25,"d":0.2083,"m":33,"x":0,"s":0,"f":0,"i":3},{"t":6.4583,"d":0.2083,"m":35,"x":0,"s":0,"f":0,"i":4},{"t":6.6667,"d":0.2083,"m":36,"x":0,"s":0,"f":0,"i":5},{"t":7.1875,"d":0.3125,"m":35,"x":0,"s":0,"f":0,"i":7},{"t":7.5,"d":0.9375,"m":36,"x":0,"s":1,"f":35,"i":8},{"t":8.4375,"d":0.3125,"m":38,"x":0,"s":0,"f":0,"i":9},{"t":8.75,"d":1.25,"m":40,"x":0,"s":1,"f":0,"i":10}],"steps":[{"t":0,"i":0},{"t":0.625,"i":1},{"t":0.9375,"i":2},{"t":1.25,"i":3},{"t":1.4583,"i":4},{"t":1.6667,"i":5},{"t":1.875,"i":6},{"t":2.1875,"i":7},{"t":2.5,"i":8},{"t":3.4375,"i":9},{"t":3.75,"i":10},{"t":4.375,"i":11},{"t":5,"i":0},{"t":5.625,"i":1},{"t":5.9375,"i":2},{"t":6.25,"i":3},{"t":6.4583,"i":4},{"t":6.6667,"i":5},{"t":6.875,"i":6},{"t":7.1875,"i":7},{"t":7.5,"i":8},{"t":8.4375,"i":9},{"t":8.75,"i":10},{"t":9.375,"i":11}],"total":10};
 
-  var ctx = null, master = null, raf = 0, timer = 0, t0 = 0, shown = -1;
+  var ctx = null, master = null, comp = null, lim = null, raf = 0, timer = 0, t0 = 0, shown = -1;
   var btn = document.getElementById("play");
   var label = document.getElementById("playlabel");
   var root = document.getElementById("player");
@@ -553,6 +553,18 @@
     var b = c.createBuffer(1, n, c.sampleRate), d = b.getChannelData(0);
     for (var i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
     return b;
+  }
+
+  // A plucked string's spectrum: strong fundamental, partials rolling off fast.
+  var bassWaveCache = null;
+  function bassWave(c){
+    if (bassWaveCache && bassWaveCache.c === c) return bassWaveCache.w;
+    var imag = new Float32Array([0,
+      1.00, 0.60, 0.42, 0.30, 0.22, 0.15, 0.10, 0.060, 0.035,
+      0.020, 0.011, 0.006, 0.0032, 0.0018, 0.0010]);
+    var w = c.createPeriodicWave(new Float32Array(imag.length), imag);
+    bassWaveCache = { c: c, w: w };
+    return w;
   }
 
   // A ghost note: a short filtered thud with no pitch.
@@ -570,26 +582,65 @@
     src.start(when); src.stop(when + 0.14);
   }
 
-  // Sawtooth through a closing lowpass: a low E's fundamental is ~41Hz and a
-  // laptop speaker cannot reproduce it, so the harmonics carry the pitch.
+  // A plucked electric bass. A low E's fundamental is ~41Hz and a laptop speaker
+  // cannot reproduce it, so the harmonics carry the pitch — but a sawtooth buzzes
+  // all the way up. This is a string's tone: rounded, with a sub for weight, a
+  // fixed body, a pluck pitch-drop, and a little per-note detune. Mirrors voice()
+  // in the editor (which also has the pickup voicings); keep the two in step.
   function pluck(c, when, dur, midi, out, soft, from){
     var f = 440 * Math.pow(2, (midi - 69) / 12);
-    var osc = c.createOscillator(); osc.type = "sawtooth";
     var f0 = from ? 440 * Math.pow(2, (from - 69) / 12) : null;
-    osc.frequency.setValueAtTime(f0 || f, when);
-    if (f0) osc.frequency.linearRampToValueAtTime(f, when + Math.min(0.11, dur * 0.5));
+
+    var osc = c.createOscillator();
+    osc.setPeriodicWave(bassWave(c));
+    osc.detune.value = (Math.random() * 2 - 1) * 5;
+    var sub = c.createOscillator();
+    sub.type = "sine";
+    sub.detune.value = 9;
+
+    if (f0){
+      osc.frequency.setValueAtTime(f0, when);
+      osc.frequency.linearRampToValueAtTime(f, when + Math.min(0.11, dur * 0.5));
+      sub.frequency.setValueAtTime(f0, when);
+      sub.frequency.linearRampToValueAtTime(f, when + Math.min(0.11, dur * 0.5));
+    } else {
+      if (!soft){
+        osc.frequency.setValueAtTime(f * 1.007, when);
+        osc.frequency.exponentialRampToValueAtTime(f, when + 0.03);
+      } else {
+        osc.frequency.setValueAtTime(f, when);
+      }
+      sub.frequency.setValueAtTime(f, when);
+    }
+
     var lp = c.createBiquadFilter();
     lp.type = "lowpass";
-    lp.Q.setValueAtTime(2.5, when);
-    lp.frequency.setValueAtTime(Math.min(5000, f * 16), when);
-    lp.frequency.exponentialRampToValueAtTime(Math.max(200, f * 2.5), when + Math.min(dur, 0.45));
-    var len = Math.max(0.09, dur * 0.92), peak = soft ? 0.16 : 0.28;
+    lp.Q.setValueAtTime(0.7, when);
+    lp.frequency.setValueAtTime(Math.min(4000, Math.max(1200, f * 12)), when);
+    lp.frequency.exponentialRampToValueAtTime(Math.max(520, f * 3.2), when + Math.min(dur, 0.5));
+
+    var bodyLow = c.createBiquadFilter();
+    bodyLow.type = "lowshelf"; bodyLow.frequency.value = 140; bodyLow.gain.value = 1.5;
+    var bodyMid = c.createBiquadFilter();
+    bodyMid.type = "peaking"; bodyMid.frequency.value = 450;
+    bodyMid.Q.value = 1.0; bodyMid.gain.value = -2.5;
+
+    var len = Math.max(0.09, dur * 0.92);
+    var peak = soft ? 0.10 : 0.17;
     var g = c.createGain();
     g.gain.setValueAtTime(0.0001, when);
-    g.gain.exponentialRampToValueAtTime(peak, when + (soft ? 0.018 : 0.006));
+    g.gain.exponentialRampToValueAtTime(peak, when + (soft ? 0.018 : 0.006) + Math.random() * 0.003);
     g.gain.exponentialRampToValueAtTime(0.0001, when + len);
-    osc.connect(lp); lp.connect(g); g.connect(out);
-    osc.start(when); osc.stop(when + len + 0.05);
+
+    var subGain = c.createGain();
+    subGain.gain.value = 0.15;
+
+    osc.connect(lp);
+    lp.connect(bodyLow); bodyLow.connect(bodyMid); bodyMid.connect(g);
+    sub.connect(subGain); subGain.connect(g);
+    g.connect(out);
+    osc.start(when); sub.start(when);
+    osc.stop(when + len + 0.05); sub.stop(when + len + 0.05);
   }
 
   function mark(i){
@@ -619,11 +670,15 @@
         master.gain.cancelScheduledValues(t);
         master.gain.setValueAtTime(master.gain.value, t);
         master.gain.linearRampToValueAtTime(0, t + 0.03);
-        var m = master;
-        setTimeout(function(){ try { m.disconnect(); } catch(e){} }, 120);
+        var m = master, cp = comp, lm = lim;
+        setTimeout(function(){
+          try { m.disconnect(); } catch(e){}
+          try { if (cp) cp.disconnect(); } catch(e){}
+          try { if (lm) lm.disconnect(); } catch(e){}
+        }, 120);
       } catch(e){}
     }
-    master = null; shown = -1;
+    master = null; comp = null; lim = null; shown = -1;
     mark(null);
     label.textContent = "Play";
     btn.classList.remove("playing");
@@ -636,7 +691,13 @@
     if (ctx.state === "suspended") ctx.resume();
     master = ctx.createGain();
     master.gain.setValueAtTime(1, ctx.currentTime);
-    master.connect(ctx.destination);
+    comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -14; comp.knee.value = 24; comp.ratio.value = 3;
+    comp.attack.value = 0.006; comp.release.value = 0.16;
+    lim = ctx.createDynamicsCompressor();
+    lim.threshold.value = -2; lim.knee.value = 0; lim.ratio.value = 20;
+    lim.attack.value = 0.002; lim.release.value = 0.08;
+    master.connect(comp); comp.connect(lim); lim.connect(ctx.destination);
     t0 = ctx.currentTime + 0.12;
     PLAN.events.forEach(function(e){
       if (e.x) dead(ctx, t0 + e.t, master);
