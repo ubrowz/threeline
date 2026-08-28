@@ -1089,7 +1089,18 @@ const ST_BOT   = ST_TOP + 4 * ST_GAP;     // bottom staff line
 const ST_MID   = ST_TOP + 2 * ST_GAP;     // middle line — D3 (MIDI 50)
 const ST_LEDGER_BELOW = 64;               // headroom for ledger lines under the staff
 const ST_HEAD_DX = 4.2;                   // notehead centre → stem
-const ST_STEM    = 26;                    // stem length
+const ST_STEM    = 22;                    // nominal stem length (~2.75 staff spaces)
+
+// Where a stem end / beam should land, given the notes it spans and the stem
+// direction — a nominal length from the far note, but kept near the staff so a
+// group high on the staff does not dangle a long stem and a detached beam below.
+function stemEnd(yFar, yNear, down){
+  let e = down ? yFar + ST_STEM : yFar - ST_STEM;
+  e = down ? Math.min(e, ST_BOT + ST_GAP + 1) : Math.max(e, ST_TOP - ST_GAP - 1);
+  e = down ? Math.max(e, yNear + ST_GAP * 1.4, ST_MID)
+           : Math.min(e, yNear - ST_GAP * 1.4, ST_MID);
+  return e;
+}
 // Directions to the player, written under the staff in italic. They are words,
 // not instructions to the editor: none of them changes how anything sounds.
 const DIRECTIONS = [
@@ -1942,7 +1953,8 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
       const down = score >= 0;
       const xs = g.items.map(it => mapX(m.x + it.x + it.w/2) + (down ? -ST_HEAD_DX : ST_HEAD_DX));
       const ys = g.items.map(it => P.get(it.i) ? P.get(it.i).y : ST_MID);
-      const beamY = down ? Math.max(...ys) + ST_STEM : Math.min(...ys) - ST_STEM;
+      const beamY = down ? stemEnd(Math.max(...ys), Math.min(...ys), true)
+                         : stemEnd(Math.min(...ys), Math.max(...ys), false);
       const xL = Math.min(xs[0], xs[xs.length-1]), xR = Math.max(xs[0], xs[xs.length-1]);
       s += `<rect x="${xL}" y="${beamY - 1.25}" width="${xR - xL}" height="2.5" fill="#2a2e35"/>`;
       const inner = down ? beamY - 5 : beamY + 5;
@@ -1992,9 +2004,7 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
 
       if (n.dur !== "w"){
         const sx  = cx + (down ? -ST_HEAD_DX : ST_HEAD_DX);
-        const end = bi ? bi.beamY
-                  : down ? Math.max(y + ST_STEM, ST_MID)
-                         : Math.min(y - ST_STEM, ST_MID);
+        const end = bi ? bi.beamY : stemEnd(y, y, down);
         s += `<line x1="${sx}" y1="${y}" x2="${sx}" y2="${end}" stroke="#2a2e35" stroke-width="1.05"/>`;
         if (!bi){
           if (n.dur === "e") s += down ? svgFlagDown(sx, end)  : svgFlag(sx, end);
