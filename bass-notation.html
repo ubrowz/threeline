@@ -1929,7 +1929,9 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
     for (const it of m.items){
       const n = notes[it.i];
       if (n.rest || n.dead) continue;
-      P.set(it.i, staffPos(midiOf(n), fifths, tab, barAcc, isTiedInto(notes, it.i)));
+      // Bass is written an octave above where it sounds (the "8vb" convention),
+      // so a walking line sits on the staff instead of hanging below it.
+      P.set(it.i, staffPos(midiOf(n) + 12, fifths, tab, barAcc, isTiedInto(notes, it.i)));
     }
 
     // beams
