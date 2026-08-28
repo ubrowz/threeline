@@ -1,0 +1,332 @@
+<!doctype html>
+<!--
+  A recording stage for a vertical promo clip. Open it, hold the phone
+  upright, tap once, and screen-record the loop. Nothing here is part of the
+  app — it only borrows the editor's notation (captured by make-demos.mjs)
+  and the landing page's synth.
+
+  Built by build.py from src/clip.html → clip.html.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#12151b">
+<title>Threeline — clip</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%227%22%20fill%3D%22%2314171D%22%2F%3E%3Crect%20x%3D%226%22%20y%3D%226.5%22%20width%3D%2220%22%20height%3D%223.4%22%20rx%3D%221.7%22%20fill%3D%22%23F2F3F5%22%2F%3E%3Crect%20x%3D%226%22%20y%3D%2214.3%22%20width%3D%2220%22%20height%3D%223.4%22%20rx%3D%221.7%22%20fill%3D%22%23F5C542%22%2F%3E%3Crect%20x%3D%226%22%20y%3D%2222.1%22%20width%3D%2220%22%20height%3D%223.4%22%20rx%3D%221.7%22%20fill%3D%22%23F2F3F5%22%2F%3E%3C%2Fsvg%3E">
+<style>
+  :root{
+    --bg:      #12151b;
+    --paper:   #FCFCFA;
+    --ink:     #14171D;
+    --graphite:#59616F;
+    --mark:    #F5C542;
+    --display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ height:100%; background:var(--bg); }
+  body{
+    font-family:var(--body); color:#EEF0F4;
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+    -webkit-user-select:none; user-select:none;
+    -webkit-tap-highlight-color:transparent;
+  }
+
+  /* The stage keeps a 9:16 shape and centres itself, so a screen recording
+     of any device or window has the clip framed with clean margins. */
+  #stage{
+    position:fixed; inset:0; margin:auto;
+    width:min(100vw, calc(100dvh * 9 / 16));
+    height:min(100dvh, calc(100vw * 16 / 9));
+    display:flex; flex-direction:column; justify-content:center;
+    gap:clamp(14px, 3.4vh, 30px);
+    padding:clamp(22px, 6vh, 58px) clamp(14px, 5vw, 34px);
+    background:var(--bg);
+  }
+
+  header{ text-align:center; flex:0 0 auto; }
+  .mid{
+    flex:0 0 auto;
+    display:flex; flex-direction:column;
+    gap:clamp(10px, 2.2vh, 16px);
+  }
+  .wordmark{
+    display:inline-flex; align-items:center; gap:.5em;
+    font:650 clamp(15px,3.6vh,22px)/1 var(--body); letter-spacing:-.01em;
+    color:#EEF0F4;
+  }
+  .wordmark svg{ width:1.3em; height:1.3em; display:block; }
+  h1{
+    font-family:var(--display); font-weight:600;
+    font-size:clamp(25px, 5.6vh, 39px); line-height:1.1;
+    letter-spacing:-.02em; text-wrap:balance;
+    margin:.55em 0 .3em;
+  }
+  h1 em{ font-style:normal; color:var(--mark); }
+  .sub{
+    color:#AEB5C0; font-size:clamp(13px,2.5vh,17px); letter-spacing:.005em;
+  }
+
+  /* notation */
+  .card{
+    flex:0 1 auto; align-self:center; width:100%;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--paper); border-radius:14px;
+    box-shadow:0 20px 60px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.3);
+    padding:clamp(12px,2vh,18px) clamp(10px,2.4vw,18px);
+    overflow:hidden;
+  }
+  .card svg{ width:100%; height:auto; display:block; }
+  .card .hit{ fill:transparent; }
+  .card .hit.playing{ fill:rgba(245,197,66,.36); }
+  .card .hitstr{ display:none; }
+
+  .legend{
+    display:flex; justify-content:space-between; gap:10px;
+    flex:0 0 auto; text-align:center;
+    color:#AEB5C0; font-size:clamp(10px,1.8vh,13px);
+    letter-spacing:.04em; text-transform:uppercase; font-weight:600;
+  }
+  .legend span{ flex:1; }
+  .legend b{ display:block; color:#EEF0F4; font-weight:700; letter-spacing:0;
+             text-transform:none; font-size:clamp(12px,2.3vh,16px); }
+
+  footer{
+    position:absolute; left:0; right:0;
+    bottom:clamp(22px, 6vh, 58px);
+    text-align:center;
+  }
+  footer .free{
+    color:#AEB5C0; font-size:clamp(12px,2.3vh,16px); letter-spacing:.02em;
+  }
+  footer .url{
+    margin-top:.35em;
+    font-family:var(--mono); font-weight:600;
+    font-size:clamp(15px,3.4vh,22px); color:#fff;
+  }
+  footer .url .mk{ color:var(--mark); }
+
+  /* tap-to-start gate — also the audio unlock iOS needs */
+  #gate{
+    position:fixed; inset:0; z-index:5;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:.7em; background:rgba(18,21,27,.86); backdrop-filter:blur(2px);
+    color:#fff; cursor:pointer;
+  }
+  #gate .play{
+    width:clamp(64px,14vh,96px); height:clamp(64px,14vh,96px);
+    border-radius:50%; background:var(--mark);
+    display:flex; align-items:center; justify-content:center;
+  }
+  #gate .play::after{
+    content:""; margin-left:14%;
+    border-style:solid; border-width:.5em 0 .5em .82em;
+    border-color:transparent transparent transparent #14171D;
+  }
+  #gate span{ font-size:clamp(14px,2.6vh,18px); letter-spacing:.03em; color:#Cfd4dc; }
+  #gate.gone{ display:none; }
+
+  @media (prefers-reduced-motion:reduce){ #gate{ backdrop-filter:none; } }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <header>
+    <span class="wordmark">
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="7" fill="#20242c"/>
+        <rect x="6" y="6.5"  width="20" height="3.4" rx="1.7" fill="#EEF0F4"/>
+        <rect x="6" y="14.3" width="20" height="3.4" rx="1.7" fill="#F5C542"/>
+        <rect x="6" y="22.1" width="20" height="3.4" rx="1.7" fill="#EEF0F4"/>
+      </svg>
+      Threeline
+    </span>
+    <h1>Every bassline<br>is just <em>three rows</em>.</h1>
+    <p class="sub">A groove in G minor — hear it, read it.</p>
+  </header>
+
+  <div class="mid">
+    <div class="card" id="card">__CLIP_SVG__</div>
+    <div class="legend">
+      <span><b>How long</b>the note is</span>
+      <span><b>Where</b>on the neck</span>
+      <span><b>What</b>it's called</span>
+    </div>
+  </div>
+
+  <footer>
+    <p class="free">Free · one file · __SIZE__ · works offline</p>
+    <p class="url">ubrowz.github.io<span class="mk">/threeline</span></p>
+  </footer>
+</div>
+
+<div id="gate" role="button" aria-label="Tap to start">
+  <span class="play" aria-hidden="true"></span>
+  <span>tap to start</span>
+</div>
+
+<script>
+(function(){
+  var PLAN = __CLIP_PLAN__;
+  var card = document.getElementById("card");
+  var gate = document.getElementById("gate");
+
+  // --- synth: copied from the landing page (which mirrors the editor's
+  //     voice()). A promo page, changed rarely; keep the three in step. ------
+  function noise(c){
+    var n = Math.floor(c.sampleRate * 0.2);
+    var b = c.createBuffer(1, n, c.sampleRate), d = b.getChannelData(0);
+    for (var i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    return b;
+  }
+  var bassWaveCache = null;
+  function bassWave(c){
+    if (bassWaveCache && bassWaveCache.c === c) return bassWaveCache.w;
+    var imag = new Float32Array([0,
+      1.00, 0.60, 0.42, 0.30, 0.22, 0.15, 0.10, 0.060, 0.035,
+      0.020, 0.011, 0.006, 0.0032, 0.0018, 0.0010]);
+    var w = c.createPeriodicWave(new Float32Array(imag.length), imag);
+    bassWaveCache = { c: c, w: w };
+    return w;
+  }
+  function dead(c, when, out){
+    var src = c.createBufferSource(); src.buffer = noise(c);
+    var bp = c.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.setValueAtTime(200, when);
+    bp.Q.setValueAtTime(0.7, when);
+    var g = c.createGain();
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(1.6, when + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 0.11);
+    src.connect(bp); bp.connect(g); g.connect(out);
+    src.start(when); src.stop(when + 0.14);
+  }
+  function pluck(c, when, dur, midi, out, soft, from){
+    var f = 440 * Math.pow(2, (midi - 69) / 12);
+    var f0 = from ? 440 * Math.pow(2, (from - 69) / 12) : null;
+
+    var osc = c.createOscillator();
+    osc.setPeriodicWave(bassWave(c));
+    osc.detune.value = (Math.random() * 2 - 1) * 5;
+    var sub = c.createOscillator();
+    sub.type = "sine";
+    sub.detune.value = 9;
+
+    if (f0){
+      osc.frequency.setValueAtTime(f0, when);
+      osc.frequency.linearRampToValueAtTime(f, when + Math.min(0.11, dur * 0.5));
+      sub.frequency.setValueAtTime(f0, when);
+      sub.frequency.linearRampToValueAtTime(f, when + Math.min(0.11, dur * 0.5));
+    } else {
+      if (!soft){
+        osc.frequency.setValueAtTime(f * 1.007, when);
+        osc.frequency.exponentialRampToValueAtTime(f, when + 0.03);
+      } else {
+        osc.frequency.setValueAtTime(f, when);
+      }
+      sub.frequency.setValueAtTime(f, when);
+    }
+
+    var lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.Q.setValueAtTime(0.7, when);
+    lp.frequency.setValueAtTime(Math.min(4000, Math.max(1200, f * 12)), when);
+    lp.frequency.exponentialRampToValueAtTime(Math.max(520, f * 3.2), when + Math.min(dur, 0.5));
+
+    var bodyLow = c.createBiquadFilter();
+    bodyLow.type = "lowshelf"; bodyLow.frequency.value = 140; bodyLow.gain.value = 1.5;
+    var bodyMid = c.createBiquadFilter();
+    bodyMid.type = "peaking"; bodyMid.frequency.value = 450;
+    bodyMid.Q.value = 1.0; bodyMid.gain.value = -2.5;
+
+    var len = Math.max(0.09, dur * 0.92);
+    var peak = soft ? 0.10 : 0.17;
+    var g = c.createGain();
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(peak, when + (soft ? 0.018 : 0.006) + Math.random() * 0.003);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + len);
+
+    var subGain = c.createGain();
+    subGain.gain.value = 0.15;
+
+    osc.connect(lp);
+    lp.connect(bodyLow); bodyLow.connect(bodyMid); bodyMid.connect(g);
+    sub.connect(subGain); subGain.connect(g);
+    g.connect(out);
+    osc.start(when); sub.start(when);
+    osc.stop(when + len + 0.05); sub.stop(when + len + 0.05);
+  }
+
+  // --- playback + playhead + loop ----------------------------------------
+  var ctx = null, master = null, comp = null, lim = null;
+  var raf = 0, loopTimer = 0, t0 = 0, shown = -1;
+  var GAP = 0.9;                  // silence between loops, seconds
+
+  function mark(i){
+    var on = card.querySelectorAll(".hit.playing");
+    for (var k = 0; k < on.length; k++) on[k].classList.remove("playing");
+    if (i == null) return;
+    var el = card.querySelectorAll('.hit[data-i="' + i + '"]');
+    for (var j = 0; j < el.length; j++) el[j].classList.add("playing");
+  }
+
+  function tick(){
+    if (!ctx) return;
+    var el = ctx.currentTime - t0, j = -1;
+    for (var k = 0; k < PLAN.steps.length; k++){
+      if (PLAN.steps[k].t <= el + 1e-6) j = k; else break;
+    }
+    if (j !== shown){ shown = j; mark(j < 0 ? null : PLAN.steps[j].i); }
+    raf = requestAnimationFrame(tick);
+  }
+
+  function playOnce(){
+    master = ctx.createGain();
+    master.gain.value = 1;
+    comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -14; comp.knee.value = 24; comp.ratio.value = 3;
+    comp.attack.value = 0.006; comp.release.value = 0.16;
+    lim = ctx.createDynamicsCompressor();
+    lim.threshold.value = -2; lim.knee.value = 0; lim.ratio.value = 20;
+    lim.attack.value = 0.002; lim.release.value = 0.08;
+    master.connect(comp); comp.connect(lim); lim.connect(ctx.destination);
+
+    t0 = ctx.currentTime + 0.12;
+    PLAN.events.forEach(function(e){
+      if (e.x) dead(ctx, t0 + e.t, master);
+      else pluck(ctx, t0 + e.t, e.d, e.m, master, !!e.s, e.f || 0);
+    });
+    shown = -1;
+    raf = requestAnimationFrame(tick);
+    loopTimer = setTimeout(function(){
+      if (raf) cancelAnimationFrame(raf), raf = 0;
+      mark(null);
+      try { master.disconnect(); comp.disconnect(); lim.disconnect(); } catch(e){}
+      loopTimer = setTimeout(playOnce, GAP * 1000);
+    }, (PLAN.total + 0.2) * 1000);
+  }
+
+  function start(){
+    gate.classList.add("gone");
+    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === "suspended") ctx.resume();
+    playOnce();
+  }
+
+  gate.addEventListener("click", start, { once:true });
+  gate.addEventListener("touchend", function(e){ e.preventDefault(); start(); }, { once:true, passive:false });
+  window.addEventListener("pagehide", function(){
+    if (raf) cancelAnimationFrame(raf);
+    if (loopTimer) clearTimeout(loopTimer);
+  });
+})();
+</script>
+</body>
+</html>

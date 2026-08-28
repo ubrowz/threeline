@@ -57,6 +57,33 @@ const PLAYER_BAR = `
   playRate = 1;
 `;
 
+// A two-bar G-minor funk groove for the promo clip: root, octave, fifth, a
+// chromatic push, then a B♭–C walk back to the root. Loops on itself.
+const CLIP = `
+  const n = newNote, sec = newSection("");
+  sec.notes = [
+    n({dur:"q", string:0, fret:3}),
+    n({dur:"e", rest:true}),
+    n({dur:"e", string:0, fret:3}),
+    n({dur:"e", string:2, fret:5}),
+    n({dur:"e", string:2, fret:5}),
+    n({dur:"e", string:1, fret:5}),
+    n({dur:"e", string:0, fret:1}),
+    n({dur:"q", string:0, fret:3}),
+    n({dur:"e", string:2, fret:5}),
+    n({dur:"e", string:1, fret:5}),
+    n({dur:"e", string:1, fret:1}),
+    n({dur:"e", string:1, fret:3}),
+    n({dur:"e", string:0, fret:3}),
+    n({dur:"e", rest:true})
+  ];
+  song = { version:1, title:"", artist:"", timeSig:{beats:4,unit:4},
+           naming:"en", key:"Bb", tempo:90, followRepeats:true, barsPerLine:"2",
+           octaves:"off", sections:[sec] };
+  entry = {dur:"e", dots:0, string:0};
+  playRate = 1;
+`;
+
 // The opening of Bach's Bourrée (Cello Suite No. 3, BWV 1009), up an octave for
 // the bass — eight bars, captured both as tab and as the standard-notation view.
 const BOURREE = `
@@ -275,8 +302,22 @@ const out = await evaluate(`(() => {
     total: +bp.total.toFixed(4)
   };
 
+  // The promo clip: a single two-bar groove, tab only, with its play plan.
+  const clip = () => { ${CLIP} cursor = {sec:0, i:-1}; selAnchor = null; render(); };
+  clip();
+  const clipSvg = systems();
+  const cp = buildPlan(0, timeline().length - 1);
+  const clipPlan = {
+    events: cp.events.map(e => ({
+      t:+e.t.toFixed(4), d:+e.dur.toFixed(4), m:e.midi,
+      x:e.dead?1:0, s:e.soft?1:0, f:e.from||0, i:e.i
+    })),
+    steps: cp.steps.map(s => ({ t:+s.t.toFixed(4), i:s.i })),
+    total: +cp.total.toFixed(4)
+  };
+
   return { player, chart, filled, bourreeTab, bourreeStd, bourreePlan,
-           bars: splitMeasures(notes).length };
+           clipSvg, clipPlan, bars: splitMeasures(notes).length };
 })()`);
 
 writeFileSync(join(HERE, "player.svg"), out.player.svg);
@@ -288,10 +329,13 @@ writeFileSync(join(HERE, "sketch-filled.svg"), out.filled);
 writeFileSync(join(HERE, "bourree-tab.svg"), out.bourreeTab);
 writeFileSync(join(HERE, "bourree-std.svg"), out.bourreeStd);
 writeFileSync(join(HERE, "bourree.json"), JSON.stringify(out.bourreePlan, null, 1));
+writeFileSync(join(HERE, "clip-groove.svg"), out.clipSvg);
+writeFileSync(join(HERE, "clip-groove.json"), JSON.stringify(out.clipPlan, null, 1));
 
 console.log(`player       ${out.player.events.length} notes to sound, ${out.player.total}s`);
 console.log(`sketch       ${out.bars} bars`);
 console.log(`bourrée      ${out.bourreePlan.events.length} notes, ${out.bourreePlan.total}s`);
+console.log(`clip         ${out.clipPlan.events.length} notes, ${out.clipPlan.total}s`);
 console.log("written to src/demo — now run: python3 build.py");
 
 ws.close();

@@ -88,6 +88,28 @@ def build() -> tuple[str, int]:
     return doc, editor_kb
 
 
+def build_clip(editor_kb: int) -> str:
+    """The vertical promo clip page — a complete document already, so this
+    only fills its placeholders. Deploys to /threeline/clip.html."""
+    page = (SRC / "clip.html").read_text()
+    parts = {
+        "__CLIP_SVG__": (SRC / "demo" / "clip-groove.svg").read_text(),
+        "__CLIP_PLAN__": json.dumps(
+            json.loads((SRC / "demo" / "clip-groove.json").read_text()),
+            separators=(",", ":"),
+        ),
+        "__SIZE__": f"{editor_kb} KB",
+    }
+    for token, value in parts.items():
+        if token not in page:
+            sys.exit(f"error: {token} is missing from src/clip.html")
+        page = page.replace(token, value)
+    leftover = re.findall(r"__[A-Z_]+__", page)
+    if leftover:
+        sys.exit(f"error: unfilled placeholders in clip.html: {sorted(set(leftover))}")
+    return page
+
+
 def stamp_readme(editor_kb: int) -> bool:
     text = README.read_text()
     updated = re.sub(
@@ -104,10 +126,14 @@ def stamp_readme(editor_kb: int) -> bool:
 def main() -> None:
     check = "--check" in sys.argv
     doc, editor_kb = build()
+    clip = build_clip(editor_kb)
+    clip_out = ROOT / "clip.html"
 
     same = OUT.exists() and OUT.read_text() == doc
+    clip_same = clip_out.exists() and clip_out.read_text() == clip
     print(f"editor      {editor_kb} KB")
     print(f"index.html  {len(doc) // 1024} KB  ({'unchanged' if same else 'rebuilt'})")
+    print(f"clip.html   {len(clip) // 1024} KB  ({'unchanged' if clip_same else 'rebuilt'})")
 
     if check:
         print("--check: nothing written")
@@ -115,6 +141,8 @@ def main() -> None:
 
     if not same:
         OUT.write_text(doc)
+    if not clip_same:
+        clip_out.write_text(clip)
     if stamp_readme(editor_kb):
         print(f"README      size updated to {editor_kb} KB")
 
