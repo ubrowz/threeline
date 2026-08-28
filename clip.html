@@ -313,15 +313,37 @@
     }, (PLAN.total + 0.2) * 1000);
   }
 
-  function start(){
-    gate.classList.add("gone");
+  // A phone hands back a suspended context, and iOS mutes WebAudio-only output
+  // on the ringer switch unless the session is marked "playback". Do both, and
+  // nudge it with a one-sample buffer the way older iOS needs. Mirrors
+  // unlockAudio() in the editor.
+  function unlock(){
+    try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch(e){}
     if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
-    if (ctx.state === "suspended") ctx.resume();
+    try {
+      var s = ctx.createBufferSource();
+      s.buffer = ctx.createBuffer(1, 1, 22050);
+      s.connect(ctx.destination); s.start(0);
+    } catch(e){}
+  }
+
+  var started = false;
+  function start(){
+    if (started) return;
+    started = true;
+    gate.classList.add("gone");
+    unlock();
+    // The clock only advances once resume() has resolved; schedule against a
+    // still-suspended context and every note is already in the past.
+    if (ctx.state !== "running"){
+      ctx.resume().then(playOnce, playOnce);
+      return;
+    }
     playOnce();
   }
 
-  gate.addEventListener("click", start, { once:true });
-  gate.addEventListener("touchend", function(e){ e.preventDefault(); start(); }, { once:true, passive:false });
+  gate.addEventListener("click", start);
+  gate.addEventListener("touchend", function(e){ e.preventDefault(); start(); }, { passive:false });
   window.addEventListener("pagehide", function(){
     if (raf) cancelAnimationFrame(raf);
     if (loopTimer) clearTimeout(loopTimer);
