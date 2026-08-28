@@ -125,6 +125,8 @@
   body.practice #notice, body.practice #carryover{ order:-3 }
   body.practice .locked{ display:flex; order:-2 }
   body.practice .card--play{ order:-1 }
+  .card--practice{ display:none }
+  body.practice .card--practice{ display:block; order:-1 }
   .carryover{
     border:1px solid var(--accent); border-radius:9px;
     padding:10px 11px; margin-bottom:12px; font-size:12.5px;
@@ -541,6 +543,20 @@
         <div class="muted" style="margin-top:7px">Play and Loop are in the bar at the top, or ⌘↵ and ⌘L.</div>
       </div>
 
+      <div class="card card--practice">
+        <h3>Score</h3>
+        <div class="row"><label>Show as</label>
+          <select class="fld" id="fNotation" title="Three rows, or standard notation on a bass clef. Practice only, and not saved — it does not touch the fingering.">
+            <option value="tab">Tab — three rows</option>
+            <option value="standard">Standard — bass clef</option>
+          </select>
+        </div>
+        <div class="row"><label>Key</label>
+          <select class="fld" id="fKey" title="Key of the piece. Sets the key signature and how notes are spelled in the standard view. Saved with the song; the tab view is unaffected."></select>
+        </div>
+        <div class="muted" style="margin-top:7px">The key is saved with the song. Standard notation is read-only — switch to Edit to change the fingering.</div>
+      </div>
+
       <div class="card">
         <h3>Keyboard</h3>
         <div class="keys">
@@ -662,6 +678,21 @@ function names(){ return NAMING[song.naming] || NAMING.nl; }
 // chord panel, the status line — still needs a name, so only the row goes.
 function showNames(){ return (song && song.naming) !== "off"; }
 
+// Keys, for the standard-notation view only. `fifths` is the position on the
+// circle of fifths (+sharps / −flats); it drives the key signature and how
+// out-of-key notes are spelled. Never touches fingering — see drawStaffSystem.
+const KEYS = [
+  { id:"Cb", label:"C♭ / A♭m — 7♭", fifths:-7 }, { id:"Gb", label:"G♭ / E♭m — 6♭", fifths:-6 },
+  { id:"Db", label:"D♭ / B♭m — 5♭", fifths:-5 }, { id:"Ab", label:"A♭ / Fm — 4♭",  fifths:-4 },
+  { id:"Eb", label:"E♭ / Cm — 3♭",  fifths:-3 }, { id:"Bb", label:"B♭ / Gm — 2♭",  fifths:-2 },
+  { id:"F",  label:"F / Dm — 1♭",   fifths:-1 }, { id:"C",  label:"C / Am — no signature", fifths:0 },
+  { id:"G",  label:"G / Em — 1♯",   fifths:1 },  { id:"D",  label:"D / Bm — 2♯",   fifths:2 },
+  { id:"A",  label:"A / F♯m — 3♯",  fifths:3 },  { id:"E",  label:"E / C♯m — 4♯",  fifths:4 },
+  { id:"B",  label:"B / G♯m — 5♯",  fifths:5 },  { id:"F#", label:"F♯ / D♯m — 6♯", fifths:6 },
+  { id:"C#", label:"C♯ / A♯m — 7♯", fifths:7 }
+];
+function keyFifths(){ const k = KEYS.find(x => x.id === (song && song.key)); return k ? k.fifths : 0; }
+
 // Duration values in quarter notes.
 const DUR = { w:4, h:2, q:1, e:0.5, s:0.25 };
 const DUR_ORDER = ["w","h","q","e","s"];
@@ -714,7 +745,7 @@ function isRefSection(){
 
 function blankSong(){
   return { version:1, title:"Untitled", artist:"", timeSig:{beats:4,unit:4},
-           naming:"nl", tuning:DEFAULT_TUNING.slice(), tempo:90, showTempo:true,
+           naming:"nl", key:"C", tuning:DEFAULT_TUNING.slice(), tempo:90, showTempo:true,
            followRepeats:true, barsPerLine:"auto", octaves:DEFAULT_OCTAVES,
            sections:[newSection("Intro")] };
 }
@@ -783,6 +814,7 @@ function demoSong(){
     artist: "",
     timeSig: { beats:4, unit:4 },
     naming: "nl",
+    key: "C",
     tuning: DEFAULT_TUNING.slice(),
     tempo: 90,
     showTempo: true,
@@ -1047,6 +1079,17 @@ const BASE_W = { w:80, h:62, q:46, e:33, s:26 };
 const MEASURE_PAD_L = 11, MEASURE_PAD_R = 9, MEASURE_MIN_W = 76;
 const REPEAT_W = 14;   // room a |: or :| takes up inside the bar
 const FONT_SIG = "700 15px system-ui,-apple-system,sans-serif";
+
+// ---- standard-notation geometry (the "Standard" Practice view) --------------
+// A 5-line bass-clef staff. Fixed — it does not grow with the string count.
+const ST_GAP   = 8;                       // px between adjacent staff lines
+const ST_STEP  = ST_GAP / 2;              // one diatonic step (line → space)
+const ST_TOP   = 40;                      // y of the top staff line, body coords
+const ST_BOT   = ST_TOP + 4 * ST_GAP;     // bottom staff line
+const ST_MID   = ST_TOP + 2 * ST_GAP;     // middle line — D3 (MIDI 50)
+const ST_LEDGER_BELOW = 64;               // headroom for ledger lines under the staff
+const ST_HEAD_DX = 4.2;                   // notehead centre → stem
+const ST_STEM    = 26;                    // stem length
 // Directions to the player, written under the staff in italic. They are words,
 // not instructions to the editor: none of them changes how anything sounds.
 const DIRECTIONS = [
@@ -1274,33 +1317,71 @@ function svgFlag2(x, y){
   return svgFlag(x, y) + svgFlag(x, y + 6);
 }
 
+// ---- glyphs for the standard-notation view ---------------------------------
+// Flags that hang off the *bottom* of a down-stem — svgFlag mirrored in y.
+function svgFlagDown(x, y){
+  return `<path d="M${x},${y} c 5,-2.5 8,-6.2 7,-11.6 c 3,6.6 1.3,10.8 -7,14.9 z" fill="#2a2e35"/>`;
+}
+function svgFlagDown2(x, y){
+  return svgFlagDown(x, y) + svgFlagDown(x, y - 6);
+}
+
+// A bass (F) clef. Hand-drawn, like tempoMark's note — a bold hook off the F
+// line with two dots to its right. Not a faithful engraving; it reads as "bass".
+function bassClef(x, yF){
+  const s = ST_GAP;
+  return `<path d="M${x + s*0.5},${yF} `
+       + `c ${s*0.1},${-s*1.7} ${s*2.5},${-s*2.0} ${s*2.7},${-s*0.2} `
+       + `c ${s*0.2},${s*2.0} ${-s*1.7},${s*3.5} ${-s*3.8},${s*4.3}" `
+       + `fill="none" stroke="#2a2e35" stroke-width="${s*0.8}" stroke-linecap="round"/>`
+       + `<circle cx="${x + s*0.8}" cy="${yF}" r="${s*0.55}" fill="#2a2e35"/>`
+       + `<circle cx="${x + s*3.6}" cy="${yF - s*0.5}" r="${s*0.3}" fill="#2a2e35"/>`
+       + `<circle cx="${x + s*3.6}" cy="${yF + s*0.5}" r="${s*0.3}" fill="#2a2e35"/>`;
+}
+
+function glyphSharp(x, y){
+  return `<path d="M${x-2.4},${y-5.5} v11 M${x+2.4},${y-6.5} v11" stroke="#2a2e35" stroke-width="0.9" fill="none"/>`
+       + `<path d="M${x-3.6},${y-2} l7.2,-1.7 M${x-3.6},${y+2.8} l7.2,-1.7" stroke="#2a2e35" stroke-width="2" fill="none"/>`;
+}
+function glyphFlat(x, y){
+  return `<path d="M${x-1.7},${y-7.5} L${x-1.7},${y+4.5}" stroke="#2a2e35" stroke-width="1.1" fill="none"/>`
+       + `<path d="M${x-1.7},${y+4} C ${x+3.6},${y+1.4} ${x+2.6},${y-3.4} ${x-1.7},${y-1.4}" fill="none" stroke="#2a2e35" stroke-width="1.5"/>`;
+}
+function glyphNatural(x, y){
+  return `<path d="M${x-2.2},${y-6.5} v10 M${x+2.2},${y-3.5} v10" stroke="#2a2e35" stroke-width="0.9" fill="none"/>`
+       + `<path d="M${x-2.2},${y-2.6} l4.4,-1.3 M${x-2.2},${y+2} l4.4,-1.3" stroke="#2a2e35" stroke-width="1.9" fill="none"/>`;
+}
+
 const BAR_INK = "#33383f";
 
-function plainBar(x){
-  return `<line x1="${x}" y1="${STAFF_TOP}" x2="${x}" y2="${STAFF_BOT}" `
+function plainBar(x, y1, y2){
+  if (y1 === undefined){ y1 = STAFF_TOP; y2 = STAFF_BOT; }
+  return `<line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" `
        + `stroke="${BAR_INK}" stroke-width="1.6"/>`;
 }
 
 // |: — thick line, thin line, then the two dots, reading into the bar
-function repeatStart(x){
-  const h = STAFF_BOT - STAFF_TOP;
-  return `<rect x="${x}" y="${STAFF_TOP}" width="3" height="${h}" fill="${BAR_INK}"/>`
-       + `<line x1="${x+5.5}" y1="${STAFF_TOP}" x2="${x+5.5}" y2="${STAFF_BOT}" stroke="${BAR_INK}" stroke-width="1.3"/>`
-       + `<circle cx="${x+10}" cy="${STAFF_TOP+7.5}" r="2" fill="${BAR_INK}"/>`
-       + `<circle cx="${x+10}" cy="${STAFF_BOT-7.5}" r="2" fill="${BAR_INK}"/>`;
+function repeatStart(x, y1, y2){
+  if (y1 === undefined){ y1 = STAFF_TOP; y2 = STAFF_BOT; }
+  const h = y2 - y1;
+  return `<rect x="${x}" y="${y1}" width="3" height="${h}" fill="${BAR_INK}"/>`
+       + `<line x1="${x+5.5}" y1="${y1}" x2="${x+5.5}" y2="${y2}" stroke="${BAR_INK}" stroke-width="1.3"/>`
+       + `<circle cx="${x+10}" cy="${y1+7.5}" r="2" fill="${BAR_INK}"/>`
+       + `<circle cx="${x+10}" cy="${y2-7.5}" r="2" fill="${BAR_INK}"/>`;
 }
 
 // :| — the same, mirrored, so the thick line lands on the boundary
-function repeatEnd(x){
-  const h = STAFF_BOT - STAFF_TOP;
-  return `<circle cx="${x-10}" cy="${STAFF_TOP+7.5}" r="2" fill="${BAR_INK}"/>`
-       + `<circle cx="${x-10}" cy="${STAFF_BOT-7.5}" r="2" fill="${BAR_INK}"/>`
-       + `<line x1="${x-5.5}" y1="${STAFF_TOP}" x2="${x-5.5}" y2="${STAFF_BOT}" stroke="${BAR_INK}" stroke-width="1.3"/>`
-       + `<rect x="${x-3}" y="${STAFF_TOP}" width="3" height="${h}" fill="${BAR_INK}"/>`;
+function repeatEnd(x, y1, y2){
+  if (y1 === undefined){ y1 = STAFF_TOP; y2 = STAFF_BOT; }
+  const h = y2 - y1;
+  return `<circle cx="${x-10}" cy="${y1+7.5}" r="2" fill="${BAR_INK}"/>`
+       + `<circle cx="${x-10}" cy="${y2-7.5}" r="2" fill="${BAR_INK}"/>`
+       + `<line x1="${x-5.5}" y1="${y1}" x2="${x-5.5}" y2="${y2}" stroke="${BAR_INK}" stroke-width="1.3"/>`
+       + `<rect x="${x-3}" y="${y1}" width="3" height="${h}" fill="${BAR_INK}"/>`;
 }
 
-function svgRest(x, dur, dots){
-  const y = REST_Y;
+function svgRest(x, dur, dots, y){
+  if (y === undefined) y = REST_Y;
   let g = "";
   if (dur === "w"){
     // hangs below its reference line
@@ -1335,6 +1416,93 @@ function svgRest(x, dur, dots){
   }
   for (let d = 0; d < dots; d++) g += `<circle cx="${x + 9.5 + d*4}" cy="${y}" r="1.6" fill="#2a2e35"/>`;
   return g;
+}
+
+/* ============================================================
+   Standard notation — pitch on a bass-clef staff
+   Read-only over `song`: never writes a note. Only the "Standard"
+   Practice view calls any of this.
+   ============================================================ */
+
+const _CL = "CDEFGAB";
+const _LETTER_PC   = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
+const _LETTER_STEP = { C:-1, D:0, E:1, F:2, G:3, A:4, B:5 };   // diatonic index vs D3 (middle line)
+const _PC_NATURAL  = { 0:"C", 2:"D", 4:"E", 5:"F", 7:"G", 9:"A", 11:"B" };
+const _MAJ = [0, 2, 4, 5, 7, 9, 11];
+const _SHARP_LETTERS = ["F","C","G","D","A","E","B"];
+const _FLAT_LETTERS  = ["B","E","A","D","G","C","F"];
+// Key-signature accidental positions on a bass clef, as diatonic index vs D3.
+const _KS_SHARP_DIA = [2, -1, 3, 0, -3, 1, -2];   // F C G D A E B
+const _KS_FLAT_DIA  = [-2, 1, -3, 0, -4, -1, 2];  // B E A D G C F
+
+// The alteration the key signature puts on a bare letter.
+function keyAlt(letter, fifths){
+  if (fifths > 0) return _SHARP_LETTERS.slice(0, fifths).indexOf(letter) >= 0 ? 1 : 0;
+  if (fifths < 0) return _FLAT_LETTERS.slice(0, -fifths).indexOf(letter) >= 0 ? -1 : 0;
+  return 0;
+}
+
+// How every pitch class is spelled in this key: { letter, alt } where alt is the
+// chromatic offset from the letter's natural (#→+1, ♭→−1). Memoised per key.
+let _spellCache = null;
+function keySpell(fifths){
+  if (_spellCache && _spellCache.f === fifths) return _spellCache.tab;
+  const tonicPc = ((fifths * 7) % 12 + 12) % 12;
+  const tonicLi = _CL.indexOf(["F","C","G","D","A","E","B"][((1 + fifths) % 7 + 7) % 7]);
+  const tab = new Array(12);
+  for (let d = 0; d < 7; d++){
+    const L = _CL[(tonicLi + d) % 7];
+    const pc = (tonicPc + _MAJ[d]) % 12;
+    let alt = ((pc - _LETTER_PC[L]) % 12 + 12) % 12;
+    if (alt > 6) alt -= 12;
+    tab[pc] = { letter: L, alt };
+  }
+  for (let pc = 0; pc < 12; pc++){
+    if (tab[pc]) continue;
+    if (_PC_NATURAL[pc])                       // a white key that is chromatic here → natural
+      tab[pc] = { letter: _PC_NATURAL[pc], alt: 0 };
+    else if (fifths >= 0)                      // a black key → sharp of the letter below
+      tab[pc] = { letter: _PC_NATURAL[(pc - 1 + 12) % 12], alt: 1 };
+    else                                       // → flat of the letter above
+      tab[pc] = { letter: _PC_NATURAL[(pc + 1) % 12], alt: -1 };
+  }
+  _spellCache = { f: fifths, tab };
+  return tab;
+}
+
+// midi → where the notehead sits, plus any accidental it needs and the ledger
+// lines under/over it. `barAcc` is a Map(letter+oct → alteration in force) that
+// the caller resets at every barline.
+function staffPos(midi, fifths, tab, barAcc, tiedIn){
+  const pc  = ((midi % 12) + 12) % 12;
+  const oct = Math.floor(midi / 12) - 1;               // SPN: MIDI 60 = C4
+  const sp  = tab[pc];
+  const dia = (oct - 3) * 7 + _LETTER_STEP[sp.letter];
+  const y   = ST_MID - dia * ST_STEP;
+  const ledgers = [];
+  if (dia > 4)  for (let d = 6;  d <= dia; d += 2) ledgers.push(ST_MID - d * ST_STEP);
+  if (dia < -4) for (let d = -6; d >= dia; d -= 2) ledgers.push(ST_MID - d * ST_STEP);
+  const k = sp.letter + oct;
+  const cur  = barAcc.has(k) ? barAcc.get(k) : keyAlt(sp.letter, fifths);
+  const want = sp.alt;
+  barAcc.set(k, want);
+  let acc = "";
+  if (!tiedIn && want !== cur) acc = want > 0 ? "#" : want < 0 ? "b" : "n";
+  return { y, dia, acc, ledgers };
+}
+
+// The key signature after the clef. Returns { svg, w }.
+function drawKeySig(fifths, x0){
+  if (!fifths) return { svg: "", w: 0 };
+  const dias = fifths > 0 ? _KS_SHARP_DIA : _KS_FLAT_DIA;
+  const glyph = fifths > 0 ? glyphSharp : glyphFlat;
+  let svg = "";
+  const n = Math.abs(fifths);
+  for (let i = 0; i < n; i++){
+    const x = x0 + i * 7;
+    svg += glyph(x, ST_MID - dias[i] * ST_STEP);
+  }
+  return { svg, w: n * 7 + 4 };
 }
 
 function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, showEnds, showExpr){
@@ -1627,6 +1795,266 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
        + `<g transform="translate(0,${top})">${s}</g></svg>`;
 }
 
+// The "Standard" Practice view. Same section/system scaffolding as drawSystem,
+// same `.hit` targets (so playhead + cursor + scroll are unchanged), but a
+// bass-clef staff instead of the three rows. Strictly read-only over `song`.
+function drawStaffSystem(secIdx, sec, sys, barNo, opts){
+  const notes = sec.notes;
+  const { showLyrics, showChords, showTups, showEnds, showExpr } = opts;
+
+  const tupBand   = showTups   ? TUP_BAND   : 0;
+  const chordBand = showChords ? CHORD_H    : 0;
+  const voltaBand = showEnds   ? VOLTA_BAND : 0;
+  const top = voltaBand + chordBand + tupBand;
+
+  const drop   = showExpr ? EXPR_H : 0;
+  const exprY  = ST_BOT + ST_LEDGER_BELOW - 6;
+  const lyricY = ST_BOT + ST_LEDGER_BELOW + drop + 14;
+  const bodyH  = (showLyrics ? lyricY + 8 : ST_BOT + ST_LEDGER_BELOW + drop + 10);
+  const H = bodyH + top;
+  const selY = top ? 2 - top : 6;
+  const selH = (bodyH - 6) - selY;
+  const W = CONTENT_W + 4;
+
+  const fifths = keyFifths();
+  const tab = keySpell(fifths);
+
+  // Clef + key signature take a left gutter layoutSection knows nothing about;
+  // compress the laid-out note area into the rest with an affine map.
+  const ks = drawKeySig(fifths, 34);
+  const inset = 30 + ks.w;
+  const xScale = Math.min(1, (W - 4 - inset - 6) / Math.max(1, sys.width));
+  const mapX = x => inset + x * xScale;
+
+  const beamed = new Set();
+  let s = "";
+
+  // ---- selection highlight ---------------------------------------------
+  for (const m of sys.measures)
+    for (const it of m.items)
+      if (inSelection(secIdx, it.i))
+        s += `<rect class="sel" x="${mapX(m.x + it.x)}" y="${selY}" width="${it.w * xScale}" height="${selH}" rx="4" fill="#fff2c9"/>`;
+
+  // ---- staff, clef, key signature ------------------------------------
+  for (let k = 0; k < 5; k++){
+    const y = ST_TOP + k * ST_GAP;
+    s += `<line x1="0" y1="${y}" x2="${W - 4}" y2="${y}" stroke="#9aa0a8" stroke-width="1"/>`;
+  }
+  s += bassClef(3, ST_TOP + ST_GAP);   // F line = 2nd from the top
+  s += ks.svg;
+
+  // ---- time signature ------------------------------------------------
+  for (const m of sys.measures){
+    if (!m.showSig) continue;
+    const x = mapX(m.x + m.sigX);
+    for (const [txt, yy] of [[String(m.sig.beats), ST_MID - 3], [String(m.sig.unit), ST_MID + 13]]){
+      const w = textW(txt, FONT_SIG);
+      s += `<rect x="${x - w/2 - 2}" y="${yy - 12.5}" width="${w + 4}" height="15" fill="#fff"/>`
+         + `<text x="${x}" y="${yy}" text-anchor="middle" font-size="15" font-weight="700" `
+         + `font-family="system-ui,-apple-system,sans-serif" fill="#2a2e35">${txt}</text>`;
+    }
+  }
+
+  const pos = new Map();
+  for (const mm of sys.measures)
+    for (const it of mm.items)
+      pos.set(it.i, mapX(mm.x + it.x + it.w / 2));
+
+  // ---- tuplet brackets --------------------------------------------
+  if (showTups){
+    for (const run of tupletRuns(notes)){
+      const a = pos.get(run.from), b = pos.get(run.to);
+      if (a === undefined || b === undefined) continue;
+      const x1 = a - 5, x2 = b + 5, mid = (x1 + x2) / 2, y = TUP_Y, tick = TUP_Y + 4.5;
+      s += `<path d="M${x1},${tick} L${x1},${y} L${mid-6},${y} M${mid+6},${y} L${x2},${y} L${x2},${tick}" `
+         + `stroke="#33383f" stroke-width="1.1" fill="none"/>`
+         + `<text x="${mid}" y="${y+3.6}" text-anchor="middle" font-size="9.5" font-weight="700" `
+         + `font-style="italic" font-family="system-ui,-apple-system,sans-serif" fill="#33383f">${run.n}</text>`;
+    }
+  }
+
+  // ---- volta brackets -------------------------------------------
+  if (showEnds){
+    const yTop = 6 - top, yTick = 15 - top;
+    let run = null;
+    const flush = () => {
+      if (!run) return;
+      s += `<path d="M${run.x1},${yTick} L${run.x1},${yTop} L${run.x2},${yTop}`
+         + (run.closes ? ` L${run.x2},${yTick}` : "") + `" stroke="#33383f" stroke-width="1.3" fill="none"/>`
+         + `<text x="${run.x1 + 4}" y="${yTick - 1}" font-size="9.5" font-weight="700" `
+         + `font-family="system-ui,-apple-system,sans-serif" fill="#33383f">${run.k}.</text>`;
+      run = null;
+    };
+    for (const mm of sys.measures){
+      const head = mm.first >= 0 ? notes[mm.first] : null;
+      const k = head ? head.ending : 0;
+      if (!k){ flush(); continue; }
+      if (run && run.k !== k) flush();
+      if (!run) run = { k, x1: mapX(mm.x), x2: mapX(mm.x + mm.w), closes: false };
+      else run.x2 = mapX(mm.x + mm.w);
+      run.closes = !!(head && head.repEnd);
+    }
+    flush();
+  }
+
+  // ---- barlines + bar number + repeats ---------------------------
+  const flagsOf = m => (m && m.first >= 0 ? notes[m.first] : null);
+  const lead = flagsOf(sys.measures[0]);
+  s += (lead && lead.repStart) ? repeatStart(mapX(0.5), ST_TOP, ST_BOT) : plainBar(mapX(0.5), ST_TOP, ST_BOT);
+  if (barNo)
+    s += `<text x="${inset - 4}" y="${ST_TOP - 7}" font-size="10" font-weight="600" `
+       + `font-family="system-ui,-apple-system,sans-serif" fill="#98a0ab">${barNo}</text>`;
+  sys.measures.forEach((m, mi) => {
+    const bx = mapX(m.x + m.w);
+    const here = flagsOf(m), next = flagsOf(sys.measures[mi + 1]);
+    const closes = !!(here && here.repEnd), opens = !!(next && next.repStart);
+    if (closes) s += repeatEnd(bx, ST_TOP, ST_BOT);
+    if (opens)  s += repeatStart(bx, ST_TOP, ST_BOT);
+    if (!closes && !opens) s += plainBar(bx, ST_TOP, ST_BOT);
+    if (closes)
+      s += `<text x="${bx - 2}" y="${ST_TOP - 6}" text-anchor="end" font-size="11" font-weight="700" `
+         + `font-family="system-ui,-apple-system,sans-serif" fill="#33383f">${(here.repTimes || 2)}x</text>`;
+  });
+
+  // ---- per-measure content -------------------------------------
+  for (const m of sys.measures){
+    const barAcc = new Map();                        // resets at every barline
+    const P = new Map();                             // it.i -> { y, dia, acc, ledgers }
+    for (const it of m.items){
+      const n = notes[it.i];
+      if (n.rest || n.dead) continue;
+      P.set(it.i, staffPos(midiOf(n), fifths, tab, barAcc, isTiedInto(notes, it.i)));
+    }
+
+    // beams
+    const beamInfo = new Map();
+    for (const g of beamGroups(notes, m)){
+      if (g.items.length < 2) continue;
+      const score = g.items.reduce((a, it) => a + ((P.get(it.i) ? P.get(it.i).dia : 0) >= 0 ? 1 : -1), 0);
+      const down = score >= 0;
+      const xs = g.items.map(it => mapX(m.x + it.x + it.w/2) + (down ? -ST_HEAD_DX : ST_HEAD_DX));
+      const ys = g.items.map(it => P.get(it.i) ? P.get(it.i).y : ST_MID);
+      const beamY = down ? Math.max(...ys) + ST_STEM : Math.min(...ys) - ST_STEM;
+      const xL = Math.min(xs[0], xs[xs.length-1]), xR = Math.max(xs[0], xs[xs.length-1]);
+      s += `<rect x="${xL}" y="${beamY - 1.25}" width="${xR - xL}" height="2.5" fill="#2a2e35"/>`;
+      const inner = down ? beamY - 5 : beamY + 5;
+      let run = [];
+      const fl = () => {
+        if (run.length >= 2){
+          const a = Math.min(...run), b = Math.max(...run);
+          s += `<rect x="${a}" y="${inner - 1.25}" width="${b - a}" height="2.5" fill="#2a2e35"/>`;
+        } else if (run.length === 1){
+          const solo = run[0], toRight = solo === xs[0];
+          s += `<rect x="${toRight ? solo : solo - 7}" y="${inner - 1.25}" width="7" height="2.5" fill="#2a2e35"/>`;
+        }
+        run = [];
+      };
+      g.items.forEach((it, k) => { if (notes[it.i].dur === "s") run.push(xs[k]); else fl(); });
+      fl();
+      g.items.forEach(it => { beamed.add(it.i); beamInfo.set(it.i, { down, beamY }); });
+    }
+
+    for (const it of m.items){
+      const n = notes[it.i];
+      const cx = mapX(m.x + it.x + it.w / 2);
+
+      if (n.rest){
+        const ry = n.dur === "w" ? ST_MID - ST_GAP + 8 : ST_MID;
+        s += svgRest(cx, n.dur, n.dots, ry);
+        s += `<rect class="hit" x="${mapX(m.x + it.x)}" y="${selY}" width="${it.w * xScale}" height="${selH}" data-sec="${secIdx}" data-i="${it.i}"/>`;
+        continue;
+      }
+
+      const sp  = P.get(it.i);
+      const y   = n.dead ? ST_MID : (sp ? sp.y : ST_MID);
+      const dia = n.dead ? 0 : (sp ? sp.dia : 0);
+      const bi  = beamInfo.get(it.i);
+      const down = bi ? bi.down : (dia >= 0);
+
+      if (sp) for (const ly of sp.ledgers)
+        s += `<line x1="${cx-7}" y1="${ly}" x2="${cx+7}" y2="${ly}" stroke="#9aa0a8" stroke-width="1"/>`;
+
+      const filled = (n.dur !== "w" && n.dur !== "h");
+      s += n.dead ? svgDeadHead(cx, y) : svgHead(cx, y, filled, n.dur === "w");
+
+      if (sp && sp.acc){
+        const gx = cx - ST_HEAD_DX - 8;
+        s += sp.acc === "#" ? glyphSharp(gx, y) : sp.acc === "b" ? glyphFlat(gx, y) : glyphNatural(gx, y);
+      }
+
+      if (n.dur !== "w"){
+        const sx  = cx + (down ? -ST_HEAD_DX : ST_HEAD_DX);
+        const end = bi ? bi.beamY
+                  : down ? Math.max(y + ST_STEM, ST_MID)
+                         : Math.min(y - ST_STEM, ST_MID);
+        s += `<line x1="${sx}" y1="${y}" x2="${sx}" y2="${end}" stroke="#2a2e35" stroke-width="1.05"/>`;
+        if (!bi){
+          if (n.dur === "e") s += down ? svgFlagDown(sx, end)  : svgFlag(sx, end);
+          if (n.dur === "s") s += down ? svgFlagDown2(sx, end) : svgFlag2(sx, end);
+        }
+      }
+
+      for (let k = 0; k < n.dots; k++){
+        const dy = (dia % 2 === 0) ? y - ST_STEP : y;   // a dot never sits on a line
+        s += `<circle cx="${cx + ST_HEAD_DX + 4 + k*4}" cy="${dy}" r="1.6" fill="#2a2e35"/>`;
+      }
+      if (n.stac) s += `<circle cx="${cx}" cy="${down ? y - 7 : y + 7}" r="1.7" fill="#2a2e35"/>`;
+
+      // ties / links
+      const carries = !pos.has(it.i + 1) && !!notes[it.i + 1];
+      const nextX = () => pos.has(it.i + 1) ? pos.get(it.i + 1) : carries ? W - 8 : null;
+      const prev = notes[it.i - 1];
+      if (prev && !pos.has(it.i - 1) && (prev.tie || prev.link)){
+        const from = Math.max(inset, cx - 26);
+        s += `<path d="M${from},${y+6} Q${(from+cx)/2},${y+13} ${cx},${y+6}" stroke="#2a2e35" `
+           + `stroke-width="${prev.tie ? 1.15 : 0.95}" fill="none"${prev.tie ? "" : ` opacity="0.7"`}/>`;
+      }
+      if (n.tie){
+        const x2 = nextX();
+        if (x2 !== null){
+          const yb = y + (down ? -6 : 6), depth = down ? -7 : 7;
+          s += `<path d="M${cx},${yb} Q${(cx+x2)/2},${yb + depth} ${x2},${yb}" stroke="#2a2e35" stroke-width="1.15" fill="none"/>`;
+        }
+      }
+      const link = notes[it.i + 1];
+      if (n.link && link && !link.rest && !n.rest){
+        const x2 = nextX();
+        if (x2 !== null){
+          const y2 = P.get(it.i + 1) ? P.get(it.i + 1).y : y;
+          if (n.link === "slide"){
+            s += `<line x1="${cx + 6}" y1="${y}" x2="${x2 - 6}" y2="${y2}" stroke="#2a2e35" stroke-width="1.5"/>`;
+          } else if (!n.tie){
+            const yb = y + (down ? -6 : 6), yb2 = y2 + (down ? -6 : 6), mx = (cx + x2) / 2;
+            s += `<path d="M${cx},${yb} Q${mx},${(yb+yb2)/2 + (down ? -8 : 8)} ${x2},${yb2}" `
+               + `stroke="#2a2e35" stroke-width="0.95" fill="none" opacity="0.7"/>`;
+          }
+        }
+      }
+
+      if (showChords && n.chord)
+        s += `<text x="${cx}" y="${CHORD_Y - tupBand}" text-anchor="middle" font-size="13" font-weight="700" `
+           + `font-family="system-ui,-apple-system,sans-serif" fill="#1b1d21">${esc(n.chord)}</text>`;
+      if (showExpr && n.expr)
+        s += `<text x="${cx - 2}" y="${exprY}" font-size="12" font-style="italic" `
+           + `font-family="system-ui,-apple-system,sans-serif" fill="#33383f">${esc(n.expr)}</text>`;
+      if (showLyrics && n.lyric)
+        s += `<text x="${cx}" y="${lyricY}" text-anchor="middle" font-size="12" `
+           + `font-family="system-ui,-apple-system,sans-serif" fill="#33383f">${esc(n.lyric)}</text>`;
+
+      s += `<rect class="hit" x="${mapX(m.x + it.x)}" y="${selY}" width="${it.w * xScale}" height="${selH}" data-sec="${secIdx}" data-i="${it.i}"/>`;
+    }
+
+    if (secIdx === cursor.sec && cursor.i === notes.length && m === sys.measures[sys.measures.length-1]){
+      const last = m.items[m.items.length-1];
+      const cx = last ? mapX(m.x + last.x + last.w) + 8 : mapX(m.x + MEASURE_PAD_L) + 6;
+      s += `<line x1="${cx}" y1="${ST_TOP - 6}" x2="${cx}" y2="${ST_BOT + 6}" stroke="#2f6fd0" stroke-width="1.6"/>`;
+    }
+  }
+
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
+       + `<g transform="translate(0,${top})">${s}</g></svg>`;
+}
+
 /* ============================================================
    Render
    ============================================================ */
@@ -1685,9 +2113,13 @@ function render(){
     html += `<input class="sectionhead" data-sechead="${si}" value="${esc(sec.heading)}" placeholder="section name…" `
       + `${musicLocked() ? "readonly " : ""}`
       + `title="Name this part of the song — Intro, Verse, Chorus. It is printed above the music.">`;
+    const std = practice && notation === "standard";
     systems.forEach((sys, k) => {
       const brk = k > 0 && opensPage(sys) ? " pagebreak" : "";
-      html += `<div class="system${brk}">${drawSystem(si, sec, sys, showLyrics, showChords, barNo, showTups, showEnds, showExpr)}</div>`;
+      const svg = std
+        ? drawStaffSystem(si, sec, sys, barNo, { showLyrics, showChords, showTups, showEnds, showExpr })
+        : drawSystem(si, sec, sys, showLyrics, showChords, barNo, showTups, showEnds, showExpr);
+      html += `<div class="system${brk}">${svg}</div>`;
       barNo += sys.measures.length;
     });
     html += `</div>`;
@@ -1905,6 +2337,8 @@ let drumFeel = "off";
 let reading = false, readZoom = 1;
 let practice = false;      // the music is fixed; only moving about and playing
 let panel = false;         // narrow screens: show the setup column instead of the sheet
+let notation = "tab";      // "tab" | "standard" — a Practice-only view, session only
+function setNotation(v){ notation = v === "standard" ? "standard" : "tab"; render(); }
 const PREF_KEY = "bass-notation-prefs";
 
 function loadPrefs(){
@@ -3344,6 +3778,7 @@ function musicLocked(){ return practice || reading; }
 // out — you put the cursor on a line and the note moves to it.
 function setPractice(on){
   practice = !!on;
+  if (!practice) notation = "tab";   // Standard notation is a Practice-only view
   document.body.classList.toggle("practice", practice);
   render();
   updateTransport();
@@ -3460,6 +3895,8 @@ function updateTransport(){
     pp.classList.toggle("on", panel);
     pp.textContent = panel ? "Sheet" : "Setup";
   }
+  const nf = $("#fNotation");   // reflects the forced reset to Tab on leaving Practice
+  if (nf) nf.value = notation;
 }
 
 
@@ -4710,6 +5147,10 @@ $("#fBars").addEventListener("change", e => { pushUndo(); song.barsPerLine = e.t
 $("#fNaming").addEventListener("change", e => {
   pushUndo(); song.naming = e.target.value; render();
 });
+// Key: metadata only — the key signature and spelling in the standard view.
+// Never re-fingers (contrast #fTuning above); just a redraw.
+$("#fKey").addEventListener("change", e => { pushUndo(); song.key = e.target.value; render(); });
+$("#fNotation").addEventListener("change", e => setNotation(e.target.value));
 $("#fTuning").addEventListener("change", e => {
   const pick = TUNINGS.find(t => t.id === e.target.value);
   if (!pick) return;
@@ -4726,6 +5167,11 @@ function syncFields(){
   $("#fTime").value   = sigText(sigAtCursor());
   $("#fBars").value   = song.barsPerLine || "auto";
   $("#fNaming").value = song.naming || "nl";
+  const ksel = $("#fKey");
+  if (ksel){
+    ksel.innerHTML = KEYS.map(k => `<option value="${k.id}">${esc(k.label)}</option>`).join("");
+    ksel.value = song.key || "C";
+  }
   const tsel = $("#fTuning");
   tsel.innerHTML = TUNINGS.map(t =>
       `<option value="${t.id}">${esc(t.label)}</option>`).join("")
@@ -4958,6 +5404,7 @@ function loadSong(obj){
     artist: obj.artist || "",
     timeSig: obj.timeSig || { beats:4, unit:4 },
     naming: obj.naming || "nl",
+    key: KEYS.some(k => k.id === obj.key) ? obj.key : "C",
     tuning: (Array.isArray(obj.tuning) && obj.tuning.length >= 2)
               ? obj.tuning.slice() : DEFAULT_TUNING.slice(),
     tempo: Math.max(30, Math.min(300, +obj.tempo || 90)),
