@@ -57,6 +57,73 @@ const PLAYER_BAR = `
   playRate = 1;
 `;
 
+// The opening of Bach's Bourrée (Cello Suite No. 3, BWV 1009), up an octave for
+// the bass — eight bars, captured both as tab and as the standard-notation view.
+const BOURREE = `
+  const n = newNote, sec = newSection("Bourrée");
+  sec.notes = [
+    n({dur:"q", rest:true}),
+    n({dur:"q", rest:true}),
+    n({dur:"q", rest:true}),
+    n({dur:"e", string:3, fret:12}),
+    n({dur:"e", string:3, fret:14}),
+    n({dur:"q", string:3, fret:15}),
+    n({dur:"e", string:3, fret:14}),
+    n({dur:"e", string:3, fret:12}),
+    n({dur:"q", string:3, fret:11}),
+    n({dur:"q", string:3, fret:12}),
+    n({dur:"e", string:3, fret:14}),
+    n({dur:"e", string:3, fret:12}),
+    n({dur:"e", string:3, fret:11}),
+    n({dur:"e", string:3, fret:9}),
+    n({dur:"e", string:3, fret:7}),
+    n({dur:"e", string:2, fret:10}),
+    n({dur:"e", string:2, fret:8}),
+    n({dur:"e", string:2, fret:7}),
+    n({dur:"e", string:2, fret:8}),
+    n({dur:"e", string:3, fret:7}),
+    n({dur:"e", string:2, fret:10}),
+    n({dur:"e", string:2, fret:8}),
+    n({dur:"e", string:2, fret:7}),
+    n({dur:"e", string:2, fret:10}),
+    n({dur:"e", string:2, fret:8}),
+    n({dur:"e", string:2, fret:7}),
+    n({dur:"e", string:1, fret:10}),
+    n({dur:"e", string:1, fret:9}),
+    n({dur:"e", string:1, fret:10}),
+    n({dur:"e", string:2, fret:7}),
+    n({dur:"e", string:2, fret:8}),
+    n({dur:"e", string:2, fret:10}),
+    n({dur:"e", string:3, fret:7}),
+    n({dur:"e", string:3, fret:9}),
+    n({dur:"q", string:3, fret:10}),
+    n({dur:"e", string:3, fret:8}),
+    n({dur:"e", string:3, fret:7}),
+    n({dur:"q", string:2, fret:10}),
+    n({dur:"q", string:2, fret:8}),
+    n({dur:"e", string:2, fret:7}),
+    n({dur:"e", string:2, fret:8}),
+    n({dur:"e", string:2, fret:10}),
+    n({dur:"e", string:3, fret:7}),
+    n({dur:"e", string:3, fret:8}),
+    n({dur:"e", string:3, fret:10}),
+    n({dur:"e", string:3, fret:12}),
+    n({dur:"e", string:3, fret:14}),
+    n({dur:"q", string:3, fret:15}),
+    n({dur:"e", string:3, fret:14}),
+    n({dur:"e", string:3, fret:12}),
+    n({dur:"e", string:3, fret:10}),
+    n({dur:"e", string:3, fret:8}),
+    n({dur:"e", string:3, fret:7}),
+    n({dur:"e", string:2, fret:10})
+  ];
+  song = { version:1, title:"", artist:"", timeSig:{beats:4,unit:4},
+           naming:"en", key:"Bb", tempo:100, followRepeats:true, barsPerLine:"4",
+           octaves:"off", sections:[sec] };
+  entry = {dur:"e", dots:0, string:3};
+  playRate = 1;
+`;
+
 // The chords-first workflow: the same bars before and after the notes go in.
 const SKETCH = `[Verse] Am | C | G G7 | Dm`;
 const SKETCH_LINE = [
@@ -179,7 +246,37 @@ const out = await evaluate(`(() => {
   render();
   const filled = document.querySelector(".system svg").outerHTML;
 
-  return { player, chart, filled, bars: splitMeasures(notes).length };
+  // The Bourrée, once as tab and once as the standard-notation Practice view.
+  // The play plan is the same either way — it is timing and pitch, not layout.
+  const bourree = () => {
+    ${BOURREE}
+    cursor = {sec:0, i:-1}; selAnchor = null;
+    render();
+  };
+  // The landing page never edits, so the per-string hit targets are dead weight.
+  const systems = () => [...document.querySelectorAll(".system svg")]
+    .map(s => s.outerHTML.replace(/<rect class="hitstr"[^>]*>(<\\/rect>)?/g, "")).join("");
+
+  bourree();
+  const bourreeTab = systems();
+  const bp = buildPlan(0, timeline().length - 1);
+
+  bourree();
+  setPractice(true); setNotation("standard");
+  const bourreeStd = systems();
+  setPractice(false); setNotation("tab");
+
+  const bourreePlan = {
+    events: bp.events.map(e => ({
+      t:+e.t.toFixed(4), d:+e.dur.toFixed(4), m:e.midi,
+      x:e.dead?1:0, s:e.soft?1:0, f:e.from||0, i:e.i
+    })),
+    steps: bp.steps.map(s => ({ t:+s.t.toFixed(4), i:s.i })),
+    total: +bp.total.toFixed(4)
+  };
+
+  return { player, chart, filled, bourreeTab, bourreeStd, bourreePlan,
+           bars: splitMeasures(notes).length };
 })()`);
 
 writeFileSync(join(HERE, "player.svg"), out.player.svg);
@@ -188,9 +285,13 @@ writeFileSync(join(HERE, "player.json"), JSON.stringify({
 }, null, 1));
 writeFileSync(join(HERE, "sketch-chart.svg"), out.chart);
 writeFileSync(join(HERE, "sketch-filled.svg"), out.filled);
+writeFileSync(join(HERE, "bourree-tab.svg"), out.bourreeTab);
+writeFileSync(join(HERE, "bourree-std.svg"), out.bourreeStd);
+writeFileSync(join(HERE, "bourree.json"), JSON.stringify(out.bourreePlan, null, 1));
 
 console.log(`player       ${out.player.events.length} notes to sound, ${out.player.total}s`);
 console.log(`sketch       ${out.bars} bars`);
+console.log(`bourrée      ${out.bourreePlan.events.length} notes, ${out.bourreePlan.total}s`);
 console.log("written to src/demo — now run: python3 build.py");
 
 ws.close();

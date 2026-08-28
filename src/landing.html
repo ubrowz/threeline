@@ -203,6 +203,10 @@
   .demo .hit, .demo .hitstr{ fill:transparent; }
   .demo .hit.playing{ fill:rgba(245,197,66,.34); }
   .demo-bar{ margin:0 0 14px; align-items:center; }
+  .demo-lbl{
+    display:block; margin:0 0 6px; font-size:.6875rem; font-weight:650;
+    letter-spacing:.08em; text-transform:uppercase; color:var(--graphite);
+  }
   .btn.sm{
     font-size:.9375rem; padding:9px 15px; border-radius:7px;
     display:inline-flex; align-items:center; gap:9px; cursor:pointer;
@@ -337,8 +341,8 @@
 
     <figure class="plate solo demo" id="player">
       <figcaption class="demo-bar">
-        <button type="button" id="play" class="btn sm">
-          <span class="tri" aria-hidden="true"></span><span id="playlabel">Play</span>
+        <button type="button" data-play class="btn sm">
+          <span class="tri" aria-hidden="true"></span><span data-playlabel>Play</span>
         </button>
         <span>Two bars at 96, played twice.</span>
       </figcaption>
@@ -351,6 +355,31 @@
       repeat instead of writing the bars out twice.
     </p>
   </section>
+
+<section>
+  <div class="wrap">
+    <div class="col">
+      <h2>The same line, both ways</h2>
+      <p class="lede" style="margin-top:20px">
+        The opening of the Bourrée from Bach's third cello suite, up an octave for
+        the bass. Once as three rows, and once as standard notation on a bass
+        clef — the view Practice mode can switch to. Same bars, same fingering;
+        only the notation changes.
+      </p>
+    </div>
+
+    <figure class="plate solo demo" id="bourree">
+      <figcaption class="demo-bar">
+        <button type="button" data-play class="btn sm">
+          <span class="tri" aria-hidden="true"></span><span data-playlabel>Play</span>
+        </button>
+        <span>Eight bars at 100.</span>
+      </figcaption>
+      <div class="sheet"><span class="demo-lbl">Tab</span>__BOURREE_TAB__</div>
+      <div class="sheet" style="margin-top:10px"><span class="demo-lbl">Standard</span>__BOURREE_STD__</div>
+    </figure>
+  </div>
+</section>
 
 <section>
   <div class="wrap">
@@ -533,14 +562,7 @@
 })();
 
 (function(){
-  var PLAN = __PLAYER_PLAN__;
-
-  var ctx = null, master = null, comp = null, lim = null, raf = 0, timer = 0, t0 = 0, shown = -1;
-  var btn = document.getElementById("play");
-  var label = document.getElementById("playlabel");
-  var root = document.getElementById("player");
-  if (!btn || !root) return;
-
+  // The synth is shared; each figure gets its own player over its own plan.
   function noise(c){
     var n = Math.floor(c.sampleRate * 0.2);
     var b = c.createBuffer(1, n, c.sampleRate), d = b.getChannelData(0);
@@ -636,75 +658,88 @@
     osc.stop(when + len + 0.05); sub.stop(when + len + 0.05);
   }
 
-  function mark(i){
-    var was = root.querySelector(".hit.playing");
-    if (was) was.classList.remove("playing");
-    if (i == null) return;
-    var el = root.querySelector('.hit[data-i="' + i + '"]');
-    if (el) el.classList.add("playing");
-  }
+  function mkPlayer(rootId, PLAN){
+    var root = document.getElementById(rootId);
+    if (!root || !PLAN) return;
+    var btn = root.querySelector("[data-play]");
+    var label = root.querySelector("[data-playlabel]");
+    if (!btn) return;
 
-  function tick(){
-    if (!ctx) return;
-    var el = ctx.currentTime - t0, j = -1;
-    for (var k = 0; k < PLAN.steps.length; k++){
-      if (PLAN.steps[k].t <= el + 1e-6) j = k; else break;
+    var ctx = null, master = null, comp = null, lim = null, raf = 0, timer = 0, t0 = 0, shown = -1;
+
+    function mark(i){
+      var on = root.querySelectorAll(".hit.playing");
+      for (var k = 0; k < on.length; k++) on[k].classList.remove("playing");
+      if (i == null) return;
+      var el = root.querySelectorAll('.hit[data-i="' + i + '"]');   // tab + standard both
+      for (var j = 0; j < el.length; j++) el[j].classList.add("playing");
     }
-    if (j !== shown){ shown = j; mark(j < 0 ? null : PLAN.steps[j].i); }
-    raf = requestAnimationFrame(tick);
-  }
 
-  function stop(){
-    if (raf) cancelAnimationFrame(raf), raf = 0;
-    if (timer) clearTimeout(timer), timer = 0;
-    if (master){
-      try {
-        var t = ctx.currentTime;
-        master.gain.cancelScheduledValues(t);
-        master.gain.setValueAtTime(master.gain.value, t);
-        master.gain.linearRampToValueAtTime(0, t + 0.03);
-        var m = master, cp = comp, lm = lim;
-        setTimeout(function(){
-          try { m.disconnect(); } catch(e){}
-          try { if (cp) cp.disconnect(); } catch(e){}
-          try { if (lm) lm.disconnect(); } catch(e){}
-        }, 120);
-      } catch(e){}
+    function tick(){
+      if (!ctx) return;
+      var el = ctx.currentTime - t0, j = -1;
+      for (var k = 0; k < PLAN.steps.length; k++){
+        if (PLAN.steps[k].t <= el + 1e-6) j = k; else break;
+      }
+      if (j !== shown){ shown = j; mark(j < 0 ? null : PLAN.steps[j].i); }
+      raf = requestAnimationFrame(tick);
     }
-    master = null; comp = null; lim = null; shown = -1;
-    mark(null);
-    label.textContent = "Play";
-    btn.classList.remove("playing");
-    btn.setAttribute("aria-pressed", "false");
+
+    function stop(){
+      if (raf) cancelAnimationFrame(raf), raf = 0;
+      if (timer) clearTimeout(timer), timer = 0;
+      if (master){
+        try {
+          var t = ctx.currentTime;
+          master.gain.cancelScheduledValues(t);
+          master.gain.setValueAtTime(master.gain.value, t);
+          master.gain.linearRampToValueAtTime(0, t + 0.03);
+          var m = master, cp = comp, lm = lim;
+          setTimeout(function(){
+            try { m.disconnect(); } catch(e){}
+            try { if (cp) cp.disconnect(); } catch(e){}
+            try { if (lm) lm.disconnect(); } catch(e){}
+          }, 120);
+        } catch(e){}
+      }
+      master = null; comp = null; lim = null; shown = -1;
+      mark(null);
+      label.textContent = "Play";
+      btn.classList.remove("playing");
+      btn.setAttribute("aria-pressed", "false");
+    }
+
+    function start(){
+      stop();
+      if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (ctx.state === "suspended") ctx.resume();
+      master = ctx.createGain();
+      master.gain.setValueAtTime(1, ctx.currentTime);
+      comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -14; comp.knee.value = 24; comp.ratio.value = 3;
+      comp.attack.value = 0.006; comp.release.value = 0.16;
+      lim = ctx.createDynamicsCompressor();
+      lim.threshold.value = -2; lim.knee.value = 0; lim.ratio.value = 20;
+      lim.attack.value = 0.002; lim.release.value = 0.08;
+      master.connect(comp); comp.connect(lim); lim.connect(ctx.destination);
+      t0 = ctx.currentTime + 0.12;
+      PLAN.events.forEach(function(e){
+        if (e.x) dead(ctx, t0 + e.t, master);
+        else pluck(ctx, t0 + e.t, e.d, e.m, master, !!e.s, e.f || 0);
+      });
+      label.textContent = "Stop";
+      btn.classList.add("playing");
+      btn.setAttribute("aria-pressed", "true");
+      raf = requestAnimationFrame(tick);
+      timer = setTimeout(stop, (PLAN.total + 0.45) * 1000);
+    }
+
+    btn.addEventListener("click", function(){ master ? stop() : start(); });
+    window.addEventListener("pagehide", stop);
   }
 
-  function start(){
-    stop();
-    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
-    if (ctx.state === "suspended") ctx.resume();
-    master = ctx.createGain();
-    master.gain.setValueAtTime(1, ctx.currentTime);
-    comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -14; comp.knee.value = 24; comp.ratio.value = 3;
-    comp.attack.value = 0.006; comp.release.value = 0.16;
-    lim = ctx.createDynamicsCompressor();
-    lim.threshold.value = -2; lim.knee.value = 0; lim.ratio.value = 20;
-    lim.attack.value = 0.002; lim.release.value = 0.08;
-    master.connect(comp); comp.connect(lim); lim.connect(ctx.destination);
-    t0 = ctx.currentTime + 0.12;
-    PLAN.events.forEach(function(e){
-      if (e.x) dead(ctx, t0 + e.t, master);
-      else pluck(ctx, t0 + e.t, e.d, e.m, master, !!e.s, e.f || 0);
-    });
-    label.textContent = "Stop";
-    btn.classList.add("playing");
-    btn.setAttribute("aria-pressed", "true");
-    raf = requestAnimationFrame(tick);
-    timer = setTimeout(stop, (PLAN.total + 0.45) * 1000);
-  }
-
-  btn.addEventListener("click", function(){ master ? stop() : start(); });
-  window.addEventListener("pagehide", stop);
+  mkPlayer("player", __PLAYER_PLAN__);
+  mkPlayer("bourree", __BOURREE_PLAN__);
 })();
 </script>
 

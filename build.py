@@ -53,6 +53,12 @@ def build() -> tuple[str, int]:
         ),
         "__CHART__": (SRC / "demo" / "sketch-chart.svg").read_text(),
         "__FILLED__": (SRC / "demo" / "sketch-filled.svg").read_text(),
+        "__BOURREE_TAB__": (SRC / "demo" / "bourree-tab.svg").read_text(),
+        "__BOURREE_STD__": (SRC / "demo" / "bourree-std.svg").read_text(),
+        "__BOURREE_PLAN__": json.dumps(
+            json.loads((SRC / "demo" / "bourree.json").read_text()),
+            separators=(",", ":"),
+        ),
         "__SIZE__": f"{editor_kb} KB",
     }
     for token, value in parts.items():
