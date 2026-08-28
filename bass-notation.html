@@ -1940,9 +1940,13 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
     for (const it of m.items){
       const n = notes[it.i];
       if (n.rest || n.dead) continue;
-      // Bass is written an octave above where it sounds (the "8vb" convention),
-      // so a walking line sits on the staff instead of hanging below it.
-      P.set(it.i, staffPos(midiOf(n) + 12, fifths, tab, barAcc, isTiedInto(notes, it.i)));
+      // A note tied into is drawn at the pitch it is tied *from* — that is what
+      // sounds and what the tab implies, even where the tie is really a slur to
+      // a different written pitch. Bass is written an octave above sounding.
+      const tin = isTiedInto(notes, it.i);
+      let mi = midiOf(n);
+      if (tin){ let j = it.i; while (j > 0 && isTiedInto(notes, j)) j--; mi = midiOf(notes[j]); }
+      P.set(it.i, staffPos(mi + 12, fifths, tab, barAcc, tin));
     }
 
     // beams
