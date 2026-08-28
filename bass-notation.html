@@ -346,6 +346,8 @@
     <button class="btn" id="btnMidi" title="Write the line out as a MIDI file, for GarageBand or any DAW. Pitch and rhythm travel; the string and fret cannot, because MIDI has no word for them.">MIDI</button>
     <button class="btn" id="btnPrint" title="Print, or save as a PDF. Only the music is printed — none of the editor.">Print / PDF</button>
     <span class="sep"></span>
+    <button class="btn" id="btnEdit" title="Editing — every click on the staff can move a note. Hit Practice to lock the music. (⇧P)">Editing</button>
+    <span class="sep"></span>
     <button class="btn" id="btnPractice" title="Lock the music so it cannot be changed by accident while you play along. Moving about, choosing what to loop and playing all still work. (⇧P)">Practice</button>
     <button class="btn" id="btnFull" title="Hide the editor and show only the music, large enough to read from a stand (f)">Full screen</button>
     <button class="btn" id="btnPlay" title="Play from the selected note, or play the selection (⌘↵)">Play</button>
@@ -3376,6 +3378,12 @@ function updateTransport(){
     pb.classList.toggle("on", practice);
     pb.textContent = practice ? "Practising" : "Practice";
   }
+  // Edit is the other half of the same switch: exactly one of the two is lit.
+  const eb = $("#btnEdit");
+  if (eb){
+    eb.classList.toggle("on", !practice);
+    eb.textContent = practice ? "Edit" : "Editing";
+  }
   const pp = $("#btnPanel");
   if (pp){
     pp.classList.toggle("on", panel);
@@ -4975,7 +4983,10 @@ $("#btnPrint").addEventListener("click", () => { stopPlayback(); window.print();
 
 $("#btnPlay").addEventListener("click", togglePlayback);
 $("#btnFull").addEventListener("click", toggleReading);
-$("#btnPractice").addEventListener("click", togglePractice);
+// Edit and Practice are a pair, not toggles: each clicks straight to its mode,
+// and clicking the one already lit does nothing. ⇧P still flips between them.
+$("#btnPractice").addEventListener("click", () => { if (!practice) setPractice(true); });
+$("#btnEdit").addEventListener("click", () => { if (practice) setPractice(false); });
 $("#btnPanel").addEventListener("click", togglePanel);
 $("#btnMidi").addEventListener("click", exportMidi);
 $("#rExit").addEventListener("click", leaveReading);
