@@ -2594,15 +2594,19 @@ function noiseBuffer(ctx){
   return (noiseCache = b);
 }
 
-let bassWaveCache = null;
-function bassWave(ctx){
-  if (bassWaveCache && bassWaveCache.ctx === ctx) return bassWaveCache.wave;
-  const imag = new Float32Array([0,
-    1.00, 0.60, 0.42, 0.30, 0.22, 0.15, 0.10, 0.060, 0.035,
-    0.020, 0.011, 0.006, 0.0032, 0.0018, 0.0010]);
-  const wave = ctx.createPeriodicWave(new Float32Array(imag.length), imag);
-  bassWaveCache = { ctx, wave };
-  return wave;
+// The warm wave for plain and P; a richer one for J, which is a brighter
+// instrument and has little up top for a subtractive voicing to work on.
+let waveCache = null;
+function bassWave(ctx, bright){
+  if (!waveCache || waveCache.ctx !== ctx){
+    const mk = a => ctx.createPeriodicWave(new Float32Array(a.length), new Float32Array(a));
+    waveCache = { ctx,
+      warm: mk([0, 1.00, 0.60, 0.42, 0.30, 0.22, 0.15, 0.10, 0.060, 0.035,
+                0.020, 0.011, 0.006, 0.0032, 0.0018, 0.0010]),
+      bright: mk([0, 1.00, 0.68, 0.50, 0.38, 0.30, 0.24, 0.19, 0.15, 0.115,
+                  0.088, 0.066, 0.048, 0.034, 0.023, 0.015]) };
+  }
+  return bright ? waveCache.bright : waveCache.warm;
 }
 
 // A ghost note: a short filtered thud with no pitch.
@@ -2698,25 +2702,25 @@ function sound(ctx, when, ev, out){
 // same places: for a pickup a fraction `at` of the string's length from the
 // bridge, the delay is at/f and the nulls land on harmonics at 1/at and up.
 //
-// A P has one pickup, further along the string. A J has two, one of them close
-// to the bridge, and their sum is what scoops its low mids out. On top of that
-// each has the resonant lift a real, inductive pickup has — lower and broader
-// on a P, higher and narrower on a J.
+// The rounded string tone has little on top for a subtractive voicing to bite,
+// so P and J also steer the note's own lowpass (`lp`) and its sub level: a P
+// runs darker and fatter, a J stays open and scooped. `plain` uses the defaults
+// in voice(); `off` colours nothing.
 const PICKUPS = {
-  // no bass at all — sound() stops before it plays a note, so with the click
-  // on this is a plain metronome. Null here also means "colour nothing".
   off: null,
   plain: null,
-  // one pickup, well along the string, and a broad lift low down: round, with
-  // the top rolled off early
+  // one fat pickup up the neck: low mids lifted, the top shut down early, more
+  // sub under it. Thumpy — a flatwound P.
   p: { at: [0.21],
-       eq: [{ f: 600, gain: 4, q: 0.8 }],
-       top: 2400, level: 0.62 },
-  // two pickups, one of them near the bridge. Their sum thins the low mids out
-  // and the growl sits an octave above where the P's warmth does
-  j: { at: [0.25, 0.11],
-       eq: [{ f: 480, gain: -4, q: 1.0 }, { f: 1700, gain: 5, q: 1.1 }],
-       top: 6000, level: 0.90 }
+       eq: [{ f: 300, gain: 5, q: 0.7 }, { f: 1500, gain: -5, q: 0.9 }],
+       top: 1600, level: 0.62, sub: 0.18,
+       lp: { openMul: 7, openMin: 900, openMax: 2200, landMul: 2.1, landMin: 360 } },
+  // two pickups, one near the bridge: a brighter wave, low mids scooped, string
+  // and growl up top, less sub. Hi-fi — a J.
+  j: { at: [0.25, 0.11], bright: true,
+       eq: [{ f: 420, gain: -6, q: 0.9 }, { f: 1750, gain: 7, q: 1.0 }],
+       top: 7000, level: 1.1, sub: 0.10,
+       lp: { openMul: 18, openMin: 2200, openMax: 6000, landMul: 4.6, landMin: 850 } }
 };
 
 // Builds the chain into `dest` and hands back the node to feed.
@@ -2764,11 +2768,14 @@ function voice(ctx, when, dur, midi, out, art){
   const soft = !!(art && art.soft);
   // a slide starts on the previous pitch and glides up or down into this one
   const from = art && art.from ? 440 * Math.pow(2, (art.from - 69) / 12) : null;
+  // P and J steer the note's own filter and sub; plain/off take the defaults
+  const pk = PICKUPS[bassSound];
+  const L = (pk && pk.lp) || { openMul: 12, openMin: 1200, openMax: 4000, landMul: 3.2, landMin: 520 };
 
   // The string's body, and a clean sine a hair sharp under it for weight on
   // headphones — offset so the two never sit still against each other.
   const osc = ctx.createOscillator();
-  osc.setPeriodicWave(bassWave(ctx));
+  osc.setPeriodicWave(bassWave(ctx, pk && pk.bright));
   osc.detune.value = (Math.random() * 2 - 1) * 5;   // no two notes exactly in tune
   const sub = ctx.createOscillator();
   sub.type = "sine";
@@ -2794,8 +2801,8 @@ function voice(ctx, when, dur, midi, out, art){
   lp.type = "lowpass";
   lp.Q.setValueAtTime(0.7, when);
   // wide enough that a low string still speaks; closes toward the body over the note
-  lp.frequency.setValueAtTime(Math.min(4000, Math.max(1200, f * 12)), when);
-  lp.frequency.exponentialRampToValueAtTime(Math.max(520, f * 3.2), when + Math.min(dur, 0.5));
+  lp.frequency.setValueAtTime(Math.min(L.openMax, Math.max(L.openMin, f * L.openMul)), when);
+  lp.frequency.exponentialRampToValueAtTime(Math.max(L.landMin, f * L.landMul), when + Math.min(dur, 0.5));
 
   // A fixed instrument body: warmth down low, and a dip in the low mids so it
   // does not honk. The same colour whatever the pitch.
@@ -2814,7 +2821,7 @@ function voice(ctx, when, dur, midi, out, art){
   g.gain.exponentialRampToValueAtTime(0.0001, when + len);
 
   const subGain = ctx.createGain();
-  subGain.gain.value = 0.15;
+  subGain.gain.value = (pk && pk.sub != null) ? pk.sub : 0.15;
 
   osc.connect(lp);
   lp.connect(bodyLow); bodyLow.connect(bodyMid);
