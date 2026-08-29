@@ -348,7 +348,7 @@
     <div class="brand">Threeline</div>
     <button class="btn" id="btnPanel" title="Switch between the sheet and the setup column">Setup</button>
     <button class="btn" id="btnNew" title="Start again with an empty transcription. Save this one first if you want to keep it.">New</button>
-    <button class="btn" id="btnOpen" title="Open a .json transcription, or a .mid to turn into a starting draft">Open…</button>
+    <button class="btn" id="btnOpen" title="Open a .json transcription, or a .mid or iReal Pro chart to turn into a starting draft">Open…</button>
     <button class="btn primary" id="btnSave" title="Save (⌘S)">Save</button>
     <button class="btn" id="btnSaveAs" title="Save to a new file (⇧⌘S)">Save as…</button>
     <button class="btn" id="btnMidi" title="Write the line out as a MIDI file, for GarageBand or any DAW. Pitch and rhythm travel; the string and fret cannot, because MIDI has no word for them.">MIDI</button>
@@ -373,7 +373,7 @@
     <span class="muted" id="saveState"></span>
     <button class="btn" id="btnUndo" title="Undo (⌘Z)">Undo</button>
     <button class="btn" id="btnRedo" title="Redo (⇧⌘Z)">Redo</button>
-    <input type="file" id="fileInput" accept=".json,.mid,.midi,application/json,audio/midi" hidden>
+    <input type="file" id="fileInput" accept=".json,.mid,.midi,.html,.htm,.txt,application/json,audio/midi,text/html,text/plain" hidden>
   </div>
 
   <div class="rotatehint">Rotate your phone for more room</div>
@@ -2006,6 +2006,13 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
       if (n.rest){
         const ry = n.dur === "w" ? ST_MID - ST_GAP + 8 : ST_MID;
         s += svgRest(cx, n.dur, n.dots, ry);
+        // a bar of rests can still carry a chord (an imported chart) or a mark
+        if (showChords && n.chord)
+          s += `<text x="${cx}" y="${CHORD_Y - tupBand}" text-anchor="middle" font-size="13" font-weight="700" `
+             + `font-family="system-ui,-apple-system,sans-serif" fill="#1b1d21">${esc(n.chord)}</text>`;
+        if (showExpr && n.expr)
+          s += `<text x="${cx - 2}" y="${exprY}" font-size="12" font-style="italic" `
+             + `font-family="system-ui,-apple-system,sans-serif" fill="#33383f">${esc(n.expr)}</text>`;
         s += `<rect class="hit" x="${mapX(m.x + it.x)}" y="${selY}" width="${it.w * xScale}" height="${selH}" data-sec="${secIdx}" data-i="${it.i}"/>`;
         continue;
       }
@@ -3005,6 +3012,276 @@ function midiName(){
   const base = (song.title && song.title !== "Untitled" ? song.title : "bass-line")
     .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return (base || "bass-line") + ".mid";
+}
+
+/* ============================================================
+   Reading an iReal Pro chart
+
+   iReal Pro shares a tune as one `irealb://` link; an exported .html is just a
+   page wrapped round it. It carries the chords and the form — not a note of
+   melody or bass — so what arrives is a grid to write a line under: the changes
+   on the downbeats, the repeats and endings, the section names.
+
+   The chord field is scrambled by a fixed 50-character block swap. unscramble()
+   is that swap, straight off the reverse-engineered spec
+   (github.com/pianosnake/ireal-reader). Everything after is our own reading of
+   the token stream, kept structural rather than expanded so the repeats stay
+   repeats.
+   ============================================================ */
+
+const IREAL_PREFIX = "1r34LbKcu7";
+
+// Each 50-char block has chars 0–4 swapped with 45–49 and 10–23 swapped with
+// 26–39. A trailing block of 50 or fewer, or one with under two chars behind
+// it, is left as-is.
+function irealUnscramble(s){
+  let r = "";
+  while (s.length > 50){
+    const p = s.slice(0, 50);
+    s = s.slice(50);
+    if (s.length < 2){ r += p; continue; }
+    const a = p.split("");
+    for (let i = 0; i < 5;  i++){ a[i] = p[49 - i]; a[49 - i] = p[i]; }
+    for (let i = 10; i < 24; i++){ a[i] = p[49 - i]; a[49 - i] = p[i]; }
+    r += a.join("");
+  }
+  return r + s;
+}
+
+// iReal key → the KEYS id with the same signature. A minor key ("A-") maps to
+// its relative major.
+const IREAL_KEYS = {
+  C:"C", G:"G", D:"D", A:"A", E:"E", B:"B", "F#":"F#", "C#":"C#", Gb:"Gb",
+  F:"F", Bb:"Bb", Eb:"Eb", Ab:"Ab", Db:"Db", Cb:"Cb",
+  "A-":"C", "E-":"G", "B-":"D", "F#-":"A", "C#-":"E", "G#-":"B", "D#-":"F#", "A#-":"C#",
+  "D-":"F", "G-":"Bb", "C-":"Eb", "F-":"Ab", "Bb-":"Db", "Eb-":"Gb", "Ab-":"Cb"
+};
+
+// iReal's suffix shorthand → something Threeline draws sensibly and, where it
+// can, matches a known chord kind. Anything unusual is passed straight through:
+// the sheet still prints it, only the "what's in it" panel gives up on it.
+function irealChord(sym){
+  if (sym === "n") return "N.C.";
+  const m = /^([A-G][#b]?)(.*)$/.exec(sym);
+  if (!m) return sym;
+  let root = m[1], q = m[2], slash = "";
+  const sl = /\/([A-G][#b]?)$/.exec(q);
+  if (sl){ slash = "/" + sl[1]; q = q.slice(0, -sl[0].length); }
+
+  if (q.startsWith("-^"))          q = "mMaj" + q.slice(2);        // minor–major 7
+  else if (q[0] === "^"){                                          // ^  ^7  ^9  ^13
+    const rest = q.slice(1);
+    q = (rest === "" || rest === "7") ? "maj7" : "maj" + rest;
+  }
+  else if (q[0] === "-")           q = "m" + q.slice(1);           // -  -7  -6  -9  -7b5
+  else if (q[0] === "h")           q = "m7b5";                     // half-diminished
+  else if (q[0] === "o")           q = q.length > 1 ? "dim7" : "dim";
+  else if (q[0] === "+")           q = "aug" + q.slice(1);
+  if (q === "sus")                 q = "sus4";
+  else if (/^[79]sus$/.test(q))    q = "7sus4";
+  return root + q + slash;
+}
+
+// The unscrambled body → a list of bars, each with its chords and whatever
+// opens or closes on it. Section markers and staff text are read for headings.
+function irealBars(raw){
+  const bars = [];
+  let cur = null;
+  let pendStart = false, pendTimes = 0, pendEnding = 0, repEndSet = false;
+  let pendHead = null, pendExpr = null, pendSig = null, lastChord = null;
+  let firstSig = null, dropped = 0;
+
+  // Threeline wants the closing repeat on the last shared bar, with the
+  // numbered endings as the bars after it. iReal puts `}` after the first
+  // ending, so the close is planted when N1 appears (or at `}` if there is
+  // none), and not moved again until the next `{`.
+  const closeRepeat = () => {
+    if (repEndSet || !bars.length) return;
+    const lb = bars[bars.length - 1];
+    lb.repEnd = true;
+    lb.repTimes = Math.max(2, Math.min(99, pendTimes || 2));
+    repEndSet = true;
+  };
+
+  const open = () => {
+    cur = { chords: [], repStart: pendStart, repEnd: false, repTimes: 2,
+            ending: pendEnding, sig: pendSig, heading: pendHead, expr: pendExpr };
+    bars.push(cur);
+    pendStart = false; pendEnding = 0; pendSig = null; pendHead = null; pendExpr = null;
+  };
+  const need    = () => { if (!cur || cur._closed) open(); };
+  const closeBar = () => { if (cur) cur._closed = true; };
+
+  const FORM = /^(intro|verse|chorus|bridge|solo|outro|head|coda|interlude|vamp|tag|ending|pre[- ]?chorus|refrain)\b/i;
+  const NAV  = /al (coda|fine)|d\.[cs]\.|^fine$|^coda$|^segno$/i;
+
+  let s = raw;
+  const eat = n => { s = s.slice(n).replace(/^\s+/, ""); };
+
+  while (s.length){
+    let m;
+    if (s[0] === " " || s[0] === ","){ eat(1); continue; }
+    if (s.startsWith("XyQ") || s.startsWith("Kcl")){ eat(3); continue; }
+    if ((m = /^Y+/.exec(s))){ eat(m[0].length); continue; }
+
+    if ((m = /^\*(\w)/.exec(s))){
+      let name = ({ i:"Intro", v:"Verse", c:"Chorus" })[m[1].toLowerCase()] || m[1].toUpperCase();
+      eat(m[0].length);
+      const t = /^<([^>]*)>/.exec(s);
+      if (t){
+        const txt = t[1].trim();
+        if (!/^x\s*\d+$/i.test(txt) && !NAV.test(txt)){ name = txt; eat(t[0].length); }
+      }
+      pendHead = name;
+      continue;
+    }
+    if ((m = /^<([^>]*)>/.exec(s))){
+      const txt = m[1].trim();
+      eat(m[0].length);
+      let x;
+      if ((x = /^x\s*(\d+)$/i.exec(txt))) pendTimes = +x[1];
+      else if (NAV.test(txt)) dropped++;
+      else if (FORM.test(txt)) pendHead = txt;
+      else if (txt) pendExpr = txt;
+      continue;
+    }
+    if ((m = /^T(\d)(\d)/.exec(s))){
+      const sig = m[0] === "T12" ? { beats:12, unit:8 } : { beats:+m[1], unit:+m[2] };
+      if (!bars.length && !cur) firstSig = sig; else pendSig = sig;
+      eat(3); continue;
+    }
+
+    if (s[0] === "{"){ pendStart = true; repEndSet = false; closeBar(); eat(1); continue; }
+    if (s[0] === "}"){ closeRepeat(); pendTimes = 0; closeBar(); eat(1); continue; }
+    if ((m = /^N(\d)/.exec(s))){
+      pendEnding = +m[1];
+      if (+m[1] === 1) closeRepeat();      // the shared bars end where the 1st ending starts
+      eat(m[0].length); continue;
+    }
+    if (s[0] === "|" || s[0] === "[" || s[0] === "]" || s[0] === "Z"){ closeBar(); eat(1); continue; }
+    if (s.startsWith("LZ")){ closeBar(); eat(2); continue; }
+
+    if (s[0] === "x"){                                   // repeat the bar before
+      need();
+      const prev = bars[bars.length - 2];
+      if (prev) cur.chords = prev.chords.slice();
+      closeBar(); eat(1); continue;
+    }
+    if (s[0] === "r"){                                   // repeat the two before
+      const p1 = bars[bars.length - 1], p2 = bars[bars.length - 2];
+      need(); if (p2) cur.chords = p2.chords.slice(); closeBar();
+      open(); if (p1) cur.chords = p1.chords.slice(); closeBar();
+      eat(1); continue;
+    }
+    if (s[0] === "n"){ need(); cur.chords.push("N.C."); eat(1); continue; }
+    if (s[0] === "p"){ eat(1); continue; }               // a slash — no new chord
+
+    if ((m = /^[A-GW][+\-\^\dhob#susadlt]*(\/[A-G][#b]?)?/.exec(s))){
+      let ch = m[0];
+      if (ch[0] === "W") ch = (lastChord || "C") + ch.slice(1);
+      else lastChord = ch.split("/")[0];
+      need();
+      cur.chords.push(irealChord(ch));
+      eat(m[0].length); continue;
+    }
+    eat(1);                                              // U S Q f s l — nothing to draw
+  }
+
+  return { bars: bars.filter(b => b.chords.length || b.heading), firstSig, dropped };
+}
+
+// A bar of `barBeats` quarter-note beats carrying `k` chords → the beat length
+// of each chord's slot, summing to the bar and landing on the sixteenth grid.
+function splitIrealBar(barBeats, k){
+  if (k <= 1) return [barBeats];
+  if (k === 3 && Math.abs(barBeats - 4) < 1e-9) return [2, 1, 1];
+  const units = Math.round(barBeats * 4), base = Math.floor(units / k), extra = units - base * k;
+  const out = [];
+  for (let i = 0; i < k; i++) out.push((base + (i < extra ? 1 : 0)) / 4);
+  return out;
+}
+
+// An iReal Pro chart as a song: bars of rests with a chord on each change, the
+// form kept as repeats, endings and sections. No notes — iReal has none.
+function songFromIreal(text, name){
+  const link = /irealb(?:ook)?:\/\/([^"'\s]+)/.exec(text);
+  if (!link) throw new Error("No iReal Pro chart found in that file.");
+  const legacy = /irealbook:\/\//.test(text);
+
+  let payload;
+  try { payload = decodeURIComponent(link[1]); }
+  catch (e){ payload = unescape(link[1]); }
+
+  const songs = payload.split("===");
+  if (songs.length > 1) songs.pop();                       // trailing playlist name
+  const fields = songs[0].split(/=+/).filter(x => x !== "");
+
+  let idx = fields.findIndex(f => f.startsWith(IREAL_PREFIX));
+  if (idx < 0) idx = legacy ? fields.findIndex(f => /[|{]/.test(f)) : 4;
+  if (idx < 0) throw new Error("That file has no chord data.");
+
+  const title    = (fields[0] || "Untitled").trim();
+  const composer = (fields[1] || "").trim();
+  const keyName  = (fields[3] || "C").trim();
+  // after the music field come (optionally) a comp style, then bpm, then a
+  // repeat count — bpm is the first plain number among them
+  const bpm = parseInt((fields.slice(idx + 1).find(f => /^\d+$/.test(f.trim())) || ""), 10);
+
+  const music = fields[idx] || "";
+  const bodyRaw = music.startsWith(IREAL_PREFIX) ? music.slice(IREAL_PREFIX.length) : music;
+  const parsed = irealBars(legacy ? bodyRaw : irealUnscramble(bodyRaw));
+  if (!parsed.bars.length) throw new Error("That chart has no chords in it.");
+
+  const sig = parsed.firstSig || { beats:4, unit:4 };
+  const barBeats = sig.beats * 4 / sig.unit;
+
+  const out = blankSong();
+  out.title = title || "Untitled";
+  const who = composer.split(/\s+/);
+  out.artist = who.length === 2 ? who[1] + " " + who[0] : composer;
+  out.timeSig = sig;
+  out.key = IREAL_KEYS[keyName] || "C";
+  if (bpm >= 30 && bpm <= 300) out.tempo = bpm;
+
+  const sections = [];
+  let sec = null, curSig = sig, chordCount = 0, unknown = 0;
+
+  for (const bar of parsed.bars){
+    if (!sec || bar.heading){
+      sec = newSection(bar.heading || "");
+      sections.push(sec);
+    }
+    const k = Math.max(1, bar.chords.length);
+    let first = null;
+    splitIrealBar(barBeats, k).forEach((beats, ri) => {
+      const pieces = spell(beats);
+      (pieces.length ? pieces : [{ dur:"q", dots:0 }]).forEach((piece, pi) => {
+        const nn = newNote({ dur: piece.dur, dots: piece.dots || 0, rest:true, string:1 });
+        if (pi === 0 && ri < bar.chords.length){
+          nn.chord = bar.chords[ri];
+          chordCount++;
+          if (nn.chord !== "N.C." && !parseChord(nn.chord)) unknown++;
+        }
+        if (!first) first = nn;
+        sec.notes.push(nn);
+      });
+    });
+    if (first){
+      if (bar.repStart) first.repStart = true;
+      if (bar.repEnd){ first.repEnd = true; first.repTimes = Math.max(2, Math.min(99, bar.repTimes || 2)); }
+      if (bar.ending)  first.ending = bar.ending;
+      if (bar.expr)    first.expr = bar.expr;
+      if (bar.sig && (bar.sig.beats !== curSig.beats || bar.sig.unit !== curSig.unit)){
+        first.sig = bar.sig; curSig = bar.sig;
+      }
+    }
+  }
+
+  out.sections = sections.length ? sections : [newSection("")];
+
+  return { song: out, bars: parsed.bars.length, sections: out.sections.length,
+           chords: chordCount, unknown, dropped: parsed.dropped,
+           extra: songs.length - 1 };
 }
 
 async function exportMidi(){
@@ -5345,10 +5622,11 @@ const FILE_TYPES = [{
   description: "Threeline transcription",
   accept: { "application/json": [".json"] }
 }];
-// Open takes a MIDI too, and turns it into a starting draft.
+// Open takes a MIDI or an iReal Pro chart too, each a starting draft.
 const OPEN_TYPES = [{
-  description: "Transcription or MIDI",
-  accept: { "application/json": [".json"], "audio/midi": [".mid", ".midi"] }
+  description: "Transcription, MIDI or iReal Pro",
+  accept: { "application/json": [".json"], "audio/midi": [".mid", ".midi"],
+            "text/html": [".html", ".htm"], "text/plain": [".txt"] }
 }];
 
 function suggestedName(){
@@ -5479,7 +5757,9 @@ async function openFile(){
       importMidi(new Uint8Array(await file.arrayBuffer()), handle.name);
       return;                            // a .mid is not somewhere to save back to
     }
-    loadSong(JSON.parse(await file.text()));
+    const text = await file.text();
+    if (isIrealText(text)){ importIreal(text, handle.name); return; }
+    loadSong(JSON.parse(text));
     fileHandle = handle;                 // so Save writes back to this file
     fileName = handle.name;
     savedText = songText();
@@ -5535,6 +5815,7 @@ $("#fileInput").addEventListener("change", e => {
     r.readAsArrayBuffer(f);
   } else {
     r.onload = () => {
+      if (isIrealText(r.result)){ importIreal(r.result, f.name); return; }
       try { loadSong(JSON.parse(r.result)); }
       catch (err){ alert("Could not open that file:\n" + err.message); }
     };
@@ -5658,6 +5939,38 @@ function importMidi(bytes, name){
   if (read.adrift) bits.push(read.adrift + " outside this bass's range, put as close as they go");
   say("Imported " + name + " — " + bits.join(", ")
       + ". The fingering is worked out, not read: MIDI does not record it. Change what does not suit you.");
+}
+
+const isIrealText = t => /irealb(?:ook)?:\/\//.test(t || "");
+
+// An iReal Pro chart is chords and form, no notes — a draft to write a line
+// under. Like a MIDI it comes unattached to any file, so Save asks where to put
+// it rather than writing over the .html.
+function importIreal(text, name){
+  let read;
+  try { read = songFromIreal(text, name); }
+  catch (err){ alert("Could not read that iReal Pro chart:\n" + (err && err.message ? err.message : err)); return; }
+
+  pushUndo();
+  const stack = undoStack.slice();
+  loadSong(read.song);
+  undoStack = stack;
+  fileHandle = null; fileName = ""; savedText = null; savedAt = null;
+  rememberHandle(null);
+  updateFileState();
+
+  const bits = [
+    read.bars + (read.bars === 1 ? " bar" : " bars"),
+    read.sections + (read.sections === 1 ? " section" : " sections"),
+    read.chords + " chords laid on rests — the bass line is yours to write"
+  ];
+  if (read.extra > 0)
+    bits.push(read.extra + " more " + (read.extra === 1 ? "song" : "songs") + " in the file, left out");
+  if (read.dropped > 0)
+    bits.push(read.dropped + " D.S./Coda mark" + (read.dropped === 1 ? "" : "s") + " dropped — Threeline has no jump for them");
+  if (read.unknown > 0)
+    bits.push(read.unknown + " chord" + (read.unknown === 1 ? "" : "s") + " printed but not analysed");
+  say("Imported " + (name || read.song.title) + " — " + bits.join(", ") + ".");
 }
 
 // A line of plain news in the sidebar, dismissible, for things worth saying but
