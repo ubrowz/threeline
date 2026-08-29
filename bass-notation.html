@@ -287,10 +287,13 @@
   @media (max-width: 520px),
          (max-width: 960px) and (orientation: landscape) and (pointer: coarse) {
 
-    /* height is measured in JS into --view-h; iOS does not reflow a bare
-       100dvh when the phone turns, which drops the docked transport bar
-       below the fold until you pinch. 100dvh is the pre-script fallback. */
-    html, body, .app{ overflow-x:hidden; height:var(--view-h, 100dvh) }
+    /* Height is measured in JS into --view-h; iOS — a Home Screen launch
+       especially — does not reflow a bare 100dvh when the phone turns, which
+       drops the docked transport bar below the fold. 100dvh is the pre-script
+       fallback. <html> is left unsized so its clientHeight stays a truthful
+       read of the viewport for that measurement. */
+    html, body, .app{ overflow-x:hidden }
+    body, .app{ height:var(--view-h, 100dvh) }
 
     .topbar{ flex-wrap:wrap; gap:6px; padding:6px 8px }
     .topbar .brand{ display:none }
@@ -3852,10 +3855,19 @@ function togglePanel(){
 
 // iOS reports a stale size when the phone turns and will not reflow a
 // height:100dvh until a pinch or a scroll forces it — which is how the docked
-// transport bar in full-screen mode ends up off the bottom of the screen.
-// Measure the height ourselves so the layout always matches what is visible.
+// transport bar in full-screen mode ends up off the bottom of the screen. From
+// a Home Screen (standalone) launch it is worse: the new size can land hundreds
+// of ms late, and sometimes no second resize event arrives at all. So measure
+// the height ourselves — <html>'s clientHeight is a truthful viewport read
+// because nothing sizes <html> — and, after any orientation signal, keep
+// re-measuring for a beat until the value stops moving.
+function readViewH(){
+  return document.documentElement.clientHeight || window.innerHeight || 0;
+}
 function measureViewport(){
-  document.documentElement.style.setProperty("--view-h", window.innerHeight + "px");
+  const px = readViewH() + "px";
+  if (document.documentElement.style.getPropertyValue("--view-h") !== px)
+    document.documentElement.style.setProperty("--view-h", px);
 }
 
 // Turning a phone, dragging the window, or crossing the narrow breakpoint all
@@ -3865,22 +3877,36 @@ function onViewportChange(){
   syncNarrow();
   if (reading) fitReading(); else fitSheet();
 }
-let viewportRaf = 0;
-function scheduleViewportChange(){
-  cancelAnimationFrame(viewportRaf);
-  viewportRaf = requestAnimationFrame(onViewportChange);
+
+// A ~1.2s burst of re-measures after an orientation signal, stopping early once
+// the height has been stable for a few frames.
+let settleRaf = 0, settleEnd = 0, settleLast = -1, settleStill = 0;
+function settleViewport(){
+  settleEnd = performance.now() + 1200;
+  if (settleRaf) return;
+  settleLast = -1; settleStill = 0;
+  const step = () => {
+    const h = readViewH();
+    if (h === settleLast){ settleStill++; }
+    else { settleStill = 0; settleLast = h; onViewportChange(); }
+    if (settleStill < 4 && performance.now() < settleEnd){
+      settleRaf = requestAnimationFrame(step);
+    } else {
+      settleRaf = 0; onViewportChange();
+    }
+  };
+  settleRaf = requestAnimationFrame(step);
 }
+
 measureViewport();
-window.addEventListener("resize", scheduleViewportChange);
-window.addEventListener("orientationchange", () => {
-  scheduleViewportChange();
-  // iOS settles the new dimensions in stages after the event fires.
-  setTimeout(onViewportChange, 200);
-  setTimeout(onViewportChange, 500);
-});
+window.addEventListener("resize", onViewportChange);
+window.addEventListener("orientationchange", () => { onViewportChange(); settleViewport(); });
 NARROW_MQ.addEventListener("change", onViewportChange);
+// Standalone launches sometimes skip resize/orientationchange but always flip
+// this media query on rotation.
+matchMedia("(orientation: portrait)").addEventListener("change", () => { onViewportChange(); settleViewport(); });
 if (window.visualViewport)
-  window.visualViewport.addEventListener("resize", scheduleViewportChange);
+  window.visualViewport.addEventListener("resize", onViewportChange);
 
 // Leaving fullscreen by any route — Esc, the browser's own button — leaves
 // reading mode with it, so the two never disagree.
