@@ -2112,11 +2112,13 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
         s += h.acc === "#" ? glyphSharp(gx, h.y) : h.acc === "b" ? glyphFlat(gx, h.y) : glyphNatural(gx, h.y);
       }
 
-      // one stem for the whole grip
+      // one stem for the whole grip: it attaches to the notehead furthest from
+      // its tip (the top head for a down-stem, the bottom head for an up-stem)
+      // and runs past the other heads to the end.
       if (n.dur !== "w"){
         const sx    = cx + (down ? -ST_HEAD_DX : ST_HEAD_DX);
-        const yFar  = down ? yLo : yHi;
-        const yNear = down ? yHi : yLo;
+        const yFar  = down ? yHi : yLo;
+        const yNear = down ? yLo : yHi;
         const end   = bi ? bi.beamY : stemEnd(yFar, yNear, down);
         s += `<line x1="${sx}" y1="${yFar}" x2="${sx}" y2="${end}" stroke="#2a2e35" stroke-width="1.05"/>`;
         if (!bi){
