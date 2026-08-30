@@ -713,9 +713,10 @@ const LS_STASH = "bass-notation-carried-over";   // set aside, not thrown away
 const DEFAULT_OCTAVES = "helmholtz";
 
 function newNote(o){
-  return Object.assign({
+  const n = Object.assign({
     dur:"q", dots:0, rest:false,
     string:2, fret:0,
+    stack:[],             // extra voices sounding with this one — {string,fret}. A double stop.
     tie:false,            // tied into the following note
     dead:false,           // ghost / muted note, drawn as x
     stac:false,           // staccato — a dot under the head, and played short
@@ -737,6 +738,11 @@ function newNote(o){
     repTimes:2,           // how many times to play it, shown as "2x"
     ending:0              // 0, or 1/2/3… for a 1st/2nd/3rd-time bar
   }, o||{});
+  n.stack = Array.isArray(n.stack)
+    ? n.stack.filter(v => v && !v.rest).map(v => ({ string: v.string|0, fret: v.fret|0 }))
+    : [];
+  if (n.rest) n.stack = [];
+  return n;
 }
 
 function newSection(heading, ref){
@@ -926,28 +932,62 @@ function midiOf(n){
   return t[Math.min(n.string, t.length - 1)] + n.fret;
 }
 
+// A double stop: the primary voice (n.string/n.fret) plus n.stack. These read
+// every voice of a grip; single notes fall through as a one-element list.
+function voiceMidi(v){ const t = tuning(); return t[Math.min(v.string, t.length - 1)] + v.fret; }
+function gripVoices(n){ return [{ string:n.string, fret:n.fret }, ...(n.stack || [])]; }
+function gripMidis(n){ return gripVoices(n).map(voiceMidi); }
+
+// Write a set of {string,fret} voices onto a note: lowest string becomes the
+// primary, the rest become n.stack. One voice always survives.
+function setGrip(n, voices){
+  if (!n || n.rest) return;
+  const seen = new Map();                       // one voice per string, last wins
+  for (const v of voices){
+    const s = Math.max(0, Math.min(NSTR - 1, v.string | 0));
+    const f = Math.max(0, Math.min(24, v.fret | 0));
+    seen.set(s, f);
+  }
+  let list = [...seen].map(([string, fret]) => ({ string, fret }))
+                      .sort((a, b) => a.string - b.string);
+  if (!list.length) list = [{ string: n.string, fret: n.fret }];
+  n.string = list[0].string;
+  n.fret   = list[0].fret;
+  n.stack  = list.slice(1);
+  n.spell  = null;
+}
+
 // Changing tuning must not transpose the music. String 0 is the lowest string,
 // so adding a low B would shift every index down a string; instead each note is
 // moved to wherever its own pitch now lives, keeping the hand as close as it can.
 function retune(next){
   const old = tuning();
+  // one voice's pitch → where it now lives, staying near its old fret
+  const remap = (oldStr, oldFret) => {
+    const midi = old[Math.min(oldStr, old.length - 1)] + oldFret;
+    let best = null;
+    for (let s = 0; s < next.length; s++){
+      const f = midi - next[s];
+      if (f < 0 || f > 24) continue;
+      const cost = Math.abs(f - oldFret);
+      if (!best || cost < best.cost) best = { string: s, fret: f, cost };
+    }
+    if (best) return { string: best.string, fret: best.fret };
+    const s = midi < next[0] ? 0 : next.length - 1;
+    return { string: s, fret: Math.max(0, Math.min(24, midi - next[s])) };
+  };
   for (const sec of song.sections){
     for (const n of sec.notes){
       if (n.rest){ n.string = Math.min(n.string, next.length - 1); continue; }
-      const midi = old[Math.min(n.string, old.length - 1)] + n.fret;
-      let best = null;
-      for (let s = 0; s < next.length; s++){
-        const f = midi - next[s];
-        if (f < 0 || f > 24) continue;
-        const cost = Math.abs(f - n.fret);
-        if (!best || cost < best.cost) best = { s, f, cost };
+      const seen = new Map();                   // remap keeps strings valid for `next`
+      for (const v of gripVoices(n)){
+        const r = remap(v.string, v.fret);
+        if (!seen.has(r.string)) seen.set(r.string, r.fret);   // a collision drops the higher voice
       }
-      if (best){ n.string = best.s; n.fret = best.f; }
-      else {                                   // outside the new instrument
-        const s = midi < next[0] ? 0 : next.length - 1;
-        n.string = s;
-        n.fret = Math.max(0, Math.min(24, midi - next[s]));
-      }
+      const list = [...seen].map(([string, fret]) => ({ string, fret }))
+                            .sort((a, b) => a.string - b.string);
+      n.string = list[0].string; n.fret = list[0].fret;
+      n.stack = list.slice(1); n.spell = null;
     }
   }
   song.tuning = next.slice();
@@ -1127,8 +1167,9 @@ function noteWidth(notes, i){
   let w = BASE_W[n.dur] * (n.dots ? 1.16 : 1);
   const label = (!n.rest && !isTiedInto(notes, i));
   if (label){
-    w = Math.max(w, textW(n.dead ? "x" : String(n.fret), FONT_FRET) + 12);
-    if (!n.dead && showNames()) w = Math.max(w, textW(nameOf(n), FONT_NAME) + 10);
+    for (const v of gripVoices(n))
+      w = Math.max(w, textW(n.dead ? "x" : String(v.fret), FONT_FRET) + 12);
+    if (!n.dead && !n.stack.length && showNames()) w = Math.max(w, textW(nameOf(n), FONT_NAME) + 10);
   }
   if (n.link) w += 7;              // room for the h / p / slide mark between notes
   if (n.lyric) w = Math.max(w, textW(n.lyric, FONT_LYRIC) + 8);
@@ -1766,16 +1807,18 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
         }
       }
 
-      // --- fret number on the staff ---
+      // --- fret number(s) on the staff — one per voice of a double stop ---
       if (!n.rest && !isTiedInto(notes, it.i)){
-        const y = stringY(n.string);
-        const t = n.dead ? "x" : String(n.fret);
-        const tw = textW(t, FONT_FRET);
-        s += `<rect class="${selected?"selbg":""}" x="${cx - tw/2 - 2.5}" y="${y-7}" width="${tw+5}" height="14" fill="${selected?"#fff2c9":"#fff"}"/>`;
-        s += `<text x="${cx}" y="${y+4.4}" text-anchor="middle" `
-           + `font-size="12.5" font-weight="600" font-family="system-ui,-apple-system,sans-serif" fill="#2a2e35">${t}</text>`;
-        // --- note name row (a dead note has no pitch to name) ---
-        if (!n.dead && showNames())
+        for (const v of gripVoices(n)){
+          const y = stringY(v.string);
+          const t = n.dead ? "x" : String(v.fret);
+          const tw = textW(t, FONT_FRET);
+          s += `<rect class="${selected?"selbg":""}" x="${cx - tw/2 - 2.5}" y="${y-7}" width="${tw+5}" height="14" fill="${selected?"#fff2c9":"#fff"}"/>`;
+          s += `<text x="${cx}" y="${y+4.4}" text-anchor="middle" `
+             + `font-size="12.5" font-weight="600" font-family="system-ui,-apple-system,sans-serif" fill="#2a2e35">${t}</text>`;
+        }
+        // --- note name row (a dead note has no pitch to name; a grip has too many) ---
+        if (!n.dead && !n.stack.length && showNames())
           s += `<text x="${cx}" y="${nameY}" text-anchor="middle" font-size="12.5" font-weight="500" `
              + `font-family="system-ui,-apple-system,sans-serif" fill="#1b1d21">${esc(nameOf(n))}</text>`;
       }
@@ -1842,10 +1885,12 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
   for (const m of sys.measures) for (const it of m.items){
     const n = notes[it.i];
     if (!n || n.rest || n.dead) continue;
-    let mi = midiOf(n);
-    if (isTiedInto(notes, it.i)){ let j = it.i; while (j > 0 && isTiedInto(notes, j)) j--; mi = midiOf(notes[j]); }
-    const sp = staffPos(mi + 12, fifths, tab, new Map(), false);
-    lowY = Math.max(lowY, sp.y + 6, ...sp.ledgers);
+    let mids = gripMidis(n);
+    if (isTiedInto(notes, it.i)){ let j = it.i; while (j > 0 && isTiedInto(notes, j)) j--; mids = gripMidis(notes[j]); }
+    for (const mi of mids){
+      const sp = staffPos(mi + 12, fifths, tab, new Map(), false);
+      lowY = Math.max(lowY, sp.y + 6, ...sp.ledgers);
+    }
   }
 
   const drop   = showExpr ? EXPR_H : 0;
@@ -1959,7 +2004,7 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
   // ---- per-measure content -------------------------------------
   for (const m of sys.measures){
     const barAcc = new Map();                        // resets at every barline
-    const P = new Map();                             // it.i -> { y, dia, acc, ledgers }
+    const P = new Map();                             // it.i -> { heads:[…], y, dia }
     for (const it of m.items){
       const n = notes[it.i];
       if (n.rest || n.dead) continue;
@@ -1967,9 +2012,14 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
       // sounds and what the tab implies, even where the tie is really a slur to
       // a different written pitch. Bass is written an octave above sounding.
       const tin = isTiedInto(notes, it.i);
-      let mi = midiOf(n);
-      if (tin){ let j = it.i; while (j > 0 && isTiedInto(notes, j)) j--; mi = midiOf(notes[j]); }
-      P.set(it.i, staffPos(mi + 12, fifths, tab, barAcc, tin));
+      let mids = gripMidis(n);
+      if (tin){ let j = it.i; while (j > 0 && isTiedInto(notes, j)) j--; mids = gripMidis(notes[j]); }
+      const heads = mids.map(mi => staffPos(mi + 12, fifths, tab, barAcc, tin))
+                        .sort((a, b) => b.y - a.y);   // lowest pitch (largest y) first
+      const meanDia = heads.reduce((a, h) => a + h.dia, 0) / heads.length;
+      // the head a down-stem must clear is the lowest; an up-stem, the highest
+      const y = meanDia >= 0 ? heads[0].y : heads[heads.length - 1].y;
+      P.set(it.i, { heads, y, dia: meanDia });
     }
 
     // beams
@@ -2020,37 +2070,68 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
       }
 
       const sp  = P.get(it.i);
-      const y   = n.dead ? ST_MID : (sp ? sp.y : ST_MID);
-      const dia = n.dead ? 0 : (sp ? sp.dia : 0);
-      const bi  = beamInfo.get(it.i);
+      // every voice of the grip; a plain note is a one-head list
+      const heads = n.dead
+        ? [{ y: ST_MID, dia: 0, acc: "", ledgers: [] }]
+        : (sp ? sp.heads : [{ y: ST_MID, dia: 0, acc: "", ledgers: [] }]);
+      const dia  = n.dead ? 0 : (sp ? sp.dia : 0);      // representative, for stem direction
+      const bi   = beamInfo.get(it.i);
       const down = bi ? bi.down : (dia >= 0);
+      const ys   = heads.map(h => h.y);
+      const yLo  = Math.max(...ys), yHi = Math.min(...ys);   // page coords: lo = further down
+      const y    = heads[0].y;                          // lowest pitch — where ties hang
 
-      if (sp) for (const ly of sp.ledgers)
+      // ledger lines, union across the grip
+      const drawnLedger = new Set();
+      for (const h of heads) for (const ly of h.ledgers){
+        if (drawnLedger.has(ly)) continue;
+        drawnLedger.add(ly);
         s += `<line x1="${cx-7}" y1="${ly}" x2="${cx+7}" y2="${ly}" stroke="#9aa0a8" stroke-width="1"/>`;
-
-      const filled = (n.dur !== "w" && n.dur !== "h");
-      s += n.dead ? svgDeadHead(cx, y) : svgHead(cx, y, filled, n.dur === "w");
-
-      if (sp && sp.acc){
-        const gx = cx - ST_HEAD_DX - 8;
-        s += sp.acc === "#" ? glyphSharp(gx, y) : sp.acc === "b" ? glyphFlat(gx, y) : glyphNatural(gx, y);
       }
 
+      // noteheads — two a step apart sit on opposite sides of the stem
+      const filled = (n.dur !== "w" && n.dur !== "h");
+      const byY = heads.slice().sort((a, b) => a.y - b.y);   // top → bottom
+      const crossed = new Set();
+      let flip = false;
+      for (let hk = 0; hk < byY.length; hk++){
+        flip = (hk > 0 && Math.abs(byY[hk].y - byY[hk-1].y) <= ST_STEP + 0.1) ? !flip : false;
+        if (flip) crossed.add(byY[hk]);
+      }
+      for (const h of heads){
+        const hx = cx + (crossed.has(h) ? (down ? ST_HEAD_DX * 2 : -ST_HEAD_DX * 2) : 0);
+        s += n.dead ? svgDeadHead(hx, h.y) : svgHead(hx, h.y, filled, n.dur === "w");
+      }
+
+      // accidentals, stacked out to the left, nudged further when they crowd
+      let accX = cx - ST_HEAD_DX - 8, lastAccY = null;
+      for (const h of byY){
+        if (!h.acc) continue;
+        const gx = (lastAccY !== null && Math.abs(h.y - lastAccY) < 12) ? accX - 8 : cx - ST_HEAD_DX - 8;
+        accX = gx; lastAccY = h.y;
+        s += h.acc === "#" ? glyphSharp(gx, h.y) : h.acc === "b" ? glyphFlat(gx, h.y) : glyphNatural(gx, h.y);
+      }
+
+      // one stem for the whole grip
       if (n.dur !== "w"){
-        const sx  = cx + (down ? -ST_HEAD_DX : ST_HEAD_DX);
-        const end = bi ? bi.beamY : stemEnd(y, y, down);
-        s += `<line x1="${sx}" y1="${y}" x2="${sx}" y2="${end}" stroke="#2a2e35" stroke-width="1.05"/>`;
+        const sx    = cx + (down ? -ST_HEAD_DX : ST_HEAD_DX);
+        const yFar  = down ? yLo : yHi;
+        const yNear = down ? yHi : yLo;
+        const end   = bi ? bi.beamY : stemEnd(yFar, yNear, down);
+        s += `<line x1="${sx}" y1="${yFar}" x2="${sx}" y2="${end}" stroke="#2a2e35" stroke-width="1.05"/>`;
         if (!bi){
           if (n.dur === "e") s += down ? svgFlagDown(sx, end)  : svgFlag(sx, end);
           if (n.dur === "s") s += down ? svgFlagDown2(sx, end) : svgFlag2(sx, end);
         }
       }
 
-      for (let k = 0; k < n.dots; k++){
-        const dy = (dia % 2 === 0) ? y - ST_STEP : y;   // a dot never sits on a line
-        s += `<circle cx="${cx + ST_HEAD_DX + 4 + k*4}" cy="${dy}" r="1.6" fill="#2a2e35"/>`;
-      }
-      if (n.stac) s += `<circle cx="${cx}" cy="${down ? y - 7 : y + 7}" r="1.7" fill="#2a2e35"/>`;
+      // aug dots — a dot per head
+      for (const h of heads)
+        for (let k = 0; k < n.dots; k++){
+          const dy = (Math.round(h.dia) % 2 === 0) ? h.y - ST_STEP : h.y;
+          s += `<circle cx="${cx + ST_HEAD_DX + 4 + k*4}" cy="${dy}" r="1.6" fill="#2a2e35"/>`;
+        }
+      if (n.stac) s += `<circle cx="${cx}" cy="${down ? yHi - 7 : yLo + 7}" r="1.7" fill="#2a2e35"/>`;
 
       // ties / links
       const carries = !pos.has(it.i + 1) && !!notes[it.i + 1];
@@ -2066,7 +2147,8 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
       if (n.tie){
         const x2 = nextX();
         if (x2 !== null){
-          const y2t  = P.get(it.i + 1) ? P.get(it.i + 1).y : y;
+          const nx   = P.get(it.i + 1);
+          const y2t  = nx ? nx.heads[0].y : y;           // primary voice only, for v1
           const same = Math.abs(y2t - y) < 0.5;
           const off  = down ? -4 : 4;                   // sit on the notehead side
           const a = y + off, b = (same ? y : y2t) + off;
@@ -2079,7 +2161,8 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
       if (n.link && link && !link.rest && !n.rest){
         const x2 = nextX();
         if (x2 !== null){
-          const y2 = P.get(it.i + 1) ? P.get(it.i + 1).y : y;
+          const nx2 = P.get(it.i + 1);
+          const y2 = nx2 ? nx2.heads[0].y : y;
           if (n.link === "slide"){
             s += `<line x1="${cx + 6}" y1="${y}" x2="${x2 - 6}" y2="${y2}" stroke="#2a2e35" stroke-width="1.5"/>`;
           } else if (!n.tie){
@@ -2391,12 +2474,17 @@ function renderSidebar(){
         </div>
       </div>`}
       ${n.rest ? "" : `
-      <div class="row"><label>String</label>
-        <select class="fld" data-str title="Which string to play it on. The pitch changes with it — use the arrow keys, or click a staff line.">${tuning().map((_,i)=>
-          `<option value="${i}" ${n.string===i?"selected":""}>${esc(stringLabel(i))}</option>`).reverse().join("")}</select>
-      </div>
-      <div class="row"><label>Fret</label>
-        <input class="fld" type="number" min="0" max="24" data-fret value="${n.fret}" title="Which fret to stop it at. 0 is the open string.">
+      <div class="row" style="align-items:flex-start"><label style="margin-top:5px">Strings</label>
+        <div style="flex:1;display:flex;flex-direction:column;gap:4px" title="A fret per string. Leave a string blank for it not to sound. More than one sounding is a double stop — ⌥-click a string line on the sheet to add it there.">
+          ${[...Array(NSTR).keys()].reverse().map(st => {
+            const v = gripVoices(n).find(x => x.string === st);
+            return `<div style="display:flex;align-items:center;gap:7px">`
+              + `<span class="muted" style="width:26px;font-weight:650">${esc(stringLabel(st))}</span>`
+              + `<input class="fld" inputmode="numeric" data-grip="${st}" value="${v ? v.fret : ""}" `
+              + `placeholder="–" style="flex:1" aria-label="${esc(stringLabel(st))} string fret">`
+              + `</div>`;
+          }).join("")}
+        </div>
       </div>
       <div class="row"><label>Name</label>
         <button class="btn" data-spell style="flex:1" title="Write the same note the other way round — Fis or Ges (n)" ${hasAltSpelling(n)?"":"disabled"}>${esc(nameOf(n))}${hasAltSpelling(n)?" ⇄":""}</button>
@@ -2472,9 +2560,11 @@ function renderStatus(){
     return;
   }
   const n = curNote();
+  const grip = n && !n.rest && n.stack.length
+    ? ` · double stop, ${n.stack.length + 1} notes` : "";
   $("#stNote").innerHTML = n
     ? (n.rest ? `<b>${DUR_LABEL[n.dur]}${n.dots?" dotted":""} rest</b>`
-              : `<b>${nameOf(n)}</b> · ${esc(stringLabel(n.string))}-string fret ${n.fret} · ${DUR_LABEL[n.dur]}${n.dots?" dotted":""}`)
+              : `<b>${nameOf(n)}</b> · ${esc(stringLabel(n.string))}-string fret ${n.fret} · ${DUR_LABEL[n.dur]}${n.dots?" dotted":""}${grip}`)
     : "";
 }
 
@@ -2654,12 +2744,17 @@ function buildPlan(fromK, toK, rate){
       // fast note still speaks. A tie runs through it, so only the last note of
       // a tied run can be short.
       const short = tl[m].n.stac;
-      events.push({
-        t, dur: short ? Math.min(total, Math.max(0.06, total * 0.5)) : total, midi: midiOf(n), si, i,
-        dead: !!n.dead,
-        soft: via === "legato" || via === "slide",
-        from: via === "slide" ? midiOf(prev.n) : null
-      });
+      const heard = short ? Math.min(total, Math.max(0.06, total * 0.5)) : total;
+      const soft = via === "legato" || via === "slide";
+      const fromMi = via === "slide" ? midiOf(prev.n) : null;
+      // one event per voice of a double stop, all sounding together
+      const offset = fromMi === null ? 0 : fromMi - midiOf(n);
+      for (const mi of gripMidis(n))
+        events.push({
+          t, dur: heard, midi: mi, si, i,
+          dead: !!n.dead, soft,
+          from: fromMi === null ? null : mi + offset
+        });
     }
     t += dur;
   }
@@ -4791,7 +4886,36 @@ function moveCursor(delta, keepSel){
 function setString(s){
   const n = curNote();
   entry.string = s;
-  if (n && !n.rest){ pushUndo(); n.string = s; n.spell = null; }
+  if (n && !n.rest){
+    pushUndo();
+    if (n.stack.length){
+      // move the primary voice to this string, vacating it if a stack voice was there
+      const voices = gripVoices(n).filter(v => v.string !== s);
+      voices.unshift({ string: s, fret: n.fret });
+      setGrip(n, voices);
+    } else {
+      n.string = s; n.spell = null;
+    }
+  }
+  pendingFret = null;
+  render();
+}
+
+// Add or drop a double-stop voice on string `st`, at the primary's fret.
+function toggleGripString(st){
+  const n = curNote();
+  if (!n || n.rest) return;
+  const voices = gripVoices(n);
+  let next;
+  if (voices.some(v => v.string === st)){
+    next = voices.filter(v => v.string !== st);
+    if (!next.length) return;                      // one voice always stays
+  } else {
+    next = [...voices, { string: st, fret: n.fret }];
+  }
+  pushUndo();
+  setGrip(n, next);
+  entry.string = n.string;
   pendingFret = null;
   render();
 }
@@ -4913,7 +5037,7 @@ function toggleRest(){
   pushUndo();
   const n = ensureSlot();
   n.rest = !n.rest;
-  if (n.rest) n.tie = false;
+  if (n.rest){ n.tie = false; n.stack = []; }
   pendingFret = null;
   render();
 }
@@ -5382,7 +5506,10 @@ $("#page").addEventListener("mousedown", e => {
     e.preventDefault();          // no text selection dragged out behind it
     if (e.shiftKey && sameSection){ dragFrom = selAnchor; render(); return; }
     dragFrom = cursor.i;                    // where a drag would be measured from
-    if (t.dataset.str !== undefined && !musicLocked()) setString(+t.dataset.str);
+    if (t.dataset.str !== undefined && !musicLocked()){
+      if (e.altKey) toggleGripString(+t.dataset.str);   // add / drop a double-stop voice
+      else setString(+t.dataset.str);
+    }
     else {
       const n = curNote();
       if (n && !n.rest){ entry.string = n.string; entry.dur = n.dur; entry.dots = n.dots; }
@@ -5444,6 +5571,25 @@ document.querySelector(".sidebar").addEventListener("input", e => {
     return;
   }
   if (d.str !== undefined){ setString(+e.target.value); return; }
+  if (d.grip !== undefined){
+    const n = curNote();
+    if (n && !n.rest){
+      const st = e.target.dataset.grip, caret = e.target.selectionStart;
+      pushUndo(tagFor("grip"));
+      const voices = [];
+      document.querySelectorAll(".sidebar [data-grip]").forEach(el => {
+        const f = el.value.trim();
+        if (/^\d{1,2}$/.test(f)) voices.push({ string: +el.dataset.grip, fret: Math.min(24, +f) });
+      });
+      if (voices.length) setGrip(n, voices);
+      entry.string = n.string;
+      pendingFret = null;
+      render();
+      const back = document.querySelector(`.sidebar [data-grip="${st}"]`);
+      if (back){ back.focus(); try { back.setSelectionRange(caret, caret); } catch(err){} }
+    }
+    return;
+  }
   if (d.expr !== undefined){
     const n = curNote();
     if (n){ pushUndo(); n.expr = e.target.value; render(); }
