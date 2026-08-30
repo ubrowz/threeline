@@ -264,6 +264,17 @@
   .readbar .btn{ padding:9px 15px }
   @media print{ .readbar{ display:none !important } }
 
+  /* touch note-entry keypad — see the #editpad markup */
+  .editpad{ display:none }
+  .editpad button{
+    padding:12px 0; font:650 15px/1 system-ui,-apple-system,sans-serif;
+    border:1px solid var(--line); border-radius:8px;
+    background:var(--card); color:var(--ink); cursor:pointer;
+    -webkit-tap-highlight-color:transparent; touch-action:manipulation;
+  }
+  .editpad button:active{ background:var(--accent); border-color:var(--accent); color:#fff }
+  @media print{ .editpad{ display:none !important } }
+
   /* ---------- print ---------- */
   @media print{
     body{background:#fff}
@@ -328,6 +339,13 @@
     /* fit the fixed 820px page to the screen (see fitSheet) */
     body.narrow:not(.reading) .scrollarea{ padding:12px 10px 90px }
     body.narrow:not(.reading) .page{ zoom:var(--fit-zoom, 1) }
+
+    /* the touch keypad docks under whichever pane is up, in Edit mode only */
+    body.narrow:not(.reading):not(.practice) .editpad{
+      display:grid; grid-template-columns:repeat(6, 1fr); gap:5px;
+      flex:0 0 auto; padding:7px 8px 9px;
+      background:var(--panel); border-top:1px solid var(--line);
+    }
   }
 
   /* portrait phone: nudge toward landscape, where the sheet fits full size */
@@ -626,6 +644,29 @@
     <span id="stNote"></span>
     <span class="spacer" style="flex:1"></span>
     <span id="stHint">Click a note to select it · click a staff line to move it to that string</span>
+  </div>
+
+  <!-- On a touch screen there is no keyboard to type frets on; this stands in.
+       Shown only under the narrow layout, in Edit mode. -->
+  <div class="editpad" id="editpad" aria-label="Note entry keypad">
+    <button type="button" data-pad="7">7</button>
+    <button type="button" data-pad="8">8</button>
+    <button type="button" data-pad="9">9</button>
+    <button type="button" data-pad="strup" title="Next string up (E A D G)">str ▲</button>
+    <button type="button" data-pad="dur" id="padDur" title="Note length — tap to cycle">q</button>
+    <button type="button" data-pad="dot" title="Dot">.</button>
+    <button type="button" data-pad="4">4</button>
+    <button type="button" data-pad="5">5</button>
+    <button type="button" data-pad="6">6</button>
+    <button type="button" data-pad="strdn" title="Next string down">str ▼</button>
+    <button type="button" data-pad="rest" title="Rest">rest</button>
+    <button type="button" data-pad="del" title="Delete this note">⌫</button>
+    <button type="button" data-pad="1">1</button>
+    <button type="button" data-pad="2">2</button>
+    <button type="button" data-pad="3">3</button>
+    <button type="button" data-pad="0">0</button>
+    <button type="button" data-pad="prev" title="Previous note">◀</button>
+    <button type="button" data-pad="next" title="Next note">▶</button>
   </div>
 </div>
 
@@ -2375,6 +2416,8 @@ function render(){
   renderSidebar();
   renderStatus();
   updateTransport();     // the loop readout follows the cursor and the selection
+  const pd = $("#padDur");
+  if (pd) pd.textContent = (curNote() || entry).dur;
   persist();
 }
 
@@ -5625,6 +5668,26 @@ document.querySelector(".sidebar").addEventListener("input", e => {
     const n = curNote();
     if (n){ pushUndo(tagFor("lyric")); n.lyric = e.target.value; render(); const el = $("#lyricInput"); if (el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }
     return;
+  }
+});
+
+// The touch keypad — each key is the tap equivalent of a note-entry shortcut.
+$("#editpad").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b || isRefSection() || musicLocked()) return;
+  const p = b.dataset.pad;
+  if (/^\d$/.test(p))      return typeDigit(+p);
+  if (p === "strup")       return nudgeString(+1);
+  if (p === "strdn")       return nudgeString(-1);
+  if (p === "prev")        return moveCursor(-1);
+  if (p === "next")        return moveCursor(+1);
+  if (p === "rest")        return toggleRest();
+  if (p === "del")         return deleteNote();
+  if (p === "dot")         return toggleDot();
+  if (p === "dur"){
+    const order = ["q", "e", "s", "h", "w"];
+    const cur = (curNote() || entry).dur;
+    return setDur(order[(order.indexOf(cur) + 1) % order.length] || "q");
   }
 });
 
