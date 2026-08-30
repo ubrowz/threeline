@@ -2150,11 +2150,15 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
         s += n.dead ? svgDeadHead(hx, h.y) : svgHead(hx, h.y, filled, n.dur === "w");
       }
 
-      // accidentals, stacked out to the left, nudged further when they crowd
-      let accX = cx - ST_HEAD_DX - 8, lastAccY = null;
+      // Accidentals sit in a column left of the leftmost notehead — a second
+      // displaced to the left of the stem pushes that edge out, so clear it.
+      // Top note first; step further left whenever the next would crowd it.
+      const leftEdge = (down && crossed.size ? cx - ST_HEAD_DX * 2 : cx) - ST_HEAD_DX;
+      const accHome = leftEdge - 6;
+      let accX = accHome, lastAccY = null;
       for (const h of byY){
         if (!h.acc) continue;
-        const gx = (lastAccY !== null && Math.abs(h.y - lastAccY) < 12) ? accX - 8 : cx - ST_HEAD_DX - 8;
+        const gx = (lastAccY !== null && Math.abs(h.y - lastAccY) < 13) ? accX - 8.5 : accHome;
         accX = gx; lastAccY = h.y;
         s += h.acc === "#" ? glyphSharp(gx, h.y) : h.acc === "b" ? glyphFlat(gx, h.y) : glyphNatural(gx, h.y);
       }
