@@ -2130,17 +2130,23 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
         s += `<line x1="${cx-7}" y1="${ly}" x2="${cx+7}" y2="${ly}" stroke="#9aa0a8" stroke-width="1"/>`;
       }
 
-      // noteheads — two a step apart sit on opposite sides of the stem
+      // Noteheads. Two a step apart cannot share a side of the stem, so one
+      // crosses over: starting from the head the stem attaches to (top for a
+      // down-stem, bottom for an up-stem) as normal, alternate sides for each
+      // successive step; a wider gap resets to the normal side.
       const filled = (n.dur !== "w" && n.dur !== "h");
-      const byY = heads.slice().sort((a, b) => a.y - b.y);   // top → bottom
+      const byY = heads.slice().sort((a, b) => a.y - b.y);      // top → bottom
+      const fromStem = down ? byY : byY.slice().reverse();      // from the attachment
       const crossed = new Set();
-      let flip = false;
-      for (let hk = 0; hk < byY.length; hk++){
-        flip = (hk > 0 && Math.abs(byY[hk].y - byY[hk-1].y) <= ST_STEP + 0.1) ? !flip : false;
-        if (flip) crossed.add(byY[hk]);
+      let prevY = null, off = false;
+      for (const h of fromStem){
+        off = (prevY !== null && Math.abs(h.y - prevY) <= ST_STEP + 0.1) ? !off : false;
+        if (off) crossed.add(h);
+        prevY = h.y;
       }
       for (const h of heads){
-        const hx = cx + (crossed.has(h) ? (down ? ST_HEAD_DX * 2 : -ST_HEAD_DX * 2) : 0);
+        // a crossed head sits on the far side of the stem
+        const hx = cx + (crossed.has(h) ? (down ? -ST_HEAD_DX * 2 : ST_HEAD_DX * 2) : 0);
         s += n.dead ? svgDeadHead(hx, h.y) : svgHead(hx, h.y, filled, n.dur === "w");
       }
 
