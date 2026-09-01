@@ -264,6 +264,21 @@
   .readbar .btn{ padding:9px 15px }
   @media print{ .readbar{ display:none !important } }
 
+  /* the Export… dropdown */
+  .popmenu{
+    position:fixed; z-index:300; min-width:212px;
+    background:var(--card); border:1px solid var(--line);
+    border-radius:10px; box-shadow:0 10px 32px rgba(0,0,0,.18); padding:5px;
+  }
+  .popmenu button{
+    display:block; width:100%; text-align:left;
+    padding:9px 11px; border:0; border-radius:7px;
+    background:none; color:var(--ink); font:inherit; cursor:pointer;
+  }
+  .popmenu button:hover:not(:disabled){ background:var(--accent-soft) }
+  .popmenu button:disabled{ opacity:.4; cursor:default }
+  @media print{ .popmenu{ display:none !important } }
+
   /* touch note-entry keypad — see the #editpad markup */
   .editpad{ display:none }
   .editpad button{
@@ -369,7 +384,7 @@
     <button class="btn" id="btnOpen" title="Open a .json transcription, or a .mid or iReal Pro chart to turn into a starting draft">Open…</button>
     <button class="btn primary" id="btnSave" title="Save (⌘S)">Save</button>
     <button class="btn" id="btnSaveAs" title="Save to a new file (⇧⌘S)">Save as…</button>
-    <button class="btn" id="btnMidi" title="Write the line out as a MIDI file, for GarageBand or any DAW. Pitch and rhythm travel; the string and fret cannot, because MIDI has no word for them.">MIDI</button>
+    <button class="btn" id="btnExport" title="Save a copy in another format — a MIDI file, or an iReal Pro chart">Export…</button>
     <button class="btn" id="btnPrint" title="Print, or save as a PDF. Only the music is printed — none of the editor.">Print / PDF</button>
     <span class="sep"></span>
     <button class="btn" id="btnEdit" title="Editing — every click on the staff can move a note. Hit Practice to lock the music. (⇧P)">Editing</button>
@@ -648,6 +663,11 @@
 
   <!-- On a touch screen there is no keyboard to type frets on; this stands in.
        Shown only under the narrow layout, in Edit mode. -->
+  <div class="popmenu" id="exportMenu" hidden>
+    <button type="button" data-export="midi">MIDI file — pitch &amp; rhythm</button>
+    <button type="button" data-export="ireal">iReal Pro chart — the chords</button>
+  </div>
+
   <div class="editpad" id="editpad" aria-label="Note entry keypad">
     <button type="button" data-pad="7">7</button>
     <button type="button" data-pad="8">8</button>
@@ -3539,6 +3559,148 @@ function songFromIreal(text, name){
            extra: songs.length - 1 };
 }
 
+/* ---- the other direction: a Threeline chart out as an iReal Pro file ----
+   Only the chords and the form travel — iReal Pro has no notes. */
+
+// Threeline's chord string → iReal's suffix shorthand (the reverse of
+// irealChord). Anything already in iReal's own vocabulary passes straight
+// through, so an imported chart round-trips.
+function unIrealChord(sym){
+  const raw = String(sym || "").trim();
+  if (!raw || /^n\.?c\.?$/i.test(raw)) return "n";
+  const m = /^([A-G][#b]?)(.*)$/.exec(raw);
+  if (!m) return raw.replace(/\s+/g, "");
+  let root = m[1], q = m[2].replace(/\s+/g, ""), slash = "";
+  const sl = /\/([A-G][#b]?)$/.exec(q);
+  if (sl){ slash = "/" + sl[1]; q = q.slice(0, -sl[0].length); }
+  const MAP = [
+    ["mMaj7","-^7"], ["maj7","^7"], ["maj9","^9"], ["Maj7","^7"], ["M7","^7"], ["maj",""],
+    ["m7b5","h7"], ["dim7","o7"], ["dim","o"],
+    ["min7","-7"], ["m11","-11"], ["m9","-9"], ["m7","-7"], ["m6","-6"], ["min","-"], ["m","-"],
+    ["aug","+"], ["9sus4","9sus"], ["7sus4","7sus"], ["sus4","sus"]
+  ];
+  for (const [t, r] of MAP)
+    if (q.startsWith(t)){ q = r + q.slice(t.length); break; }
+  return root + q + slash;
+}
+
+// A section heading → an iReal rehearsal mark, so it re-imports as a section.
+function irealMark(heading, i){
+  const h = (heading || "").trim().toLowerCase();
+  if (/^intro/.test(h))  return "*i";
+  if (/^verse/.test(h))  return "*v";
+  if (/^chorus/.test(h)) return "*c";
+  return "*" + String.fromCharCode(65 + (i % 26));
+}
+
+// The unscrambled token body: sections, metre, bars, chords, repeats, endings.
+function irealBody(){
+  let out = "", curSig = null;
+  const secs = song.sections.filter(s => !s.ref);
+  const T = sg => (sg.beats === 12 && sg.unit === 8) ? "T12" : "T" + sg.beats + sg.unit;
+
+  secs.forEach((sec, sx) => {
+    const bars = measuresOf(sec);
+    if (sec.heading || sx > 0) out += irealMark(sec.heading, sx);
+    if (sec.heading) out += "<" + sec.heading.replace(/[<>]/g, "") + ">";
+
+    bars.forEach((bar, bx) => {
+      const head = bar.idx.length ? sec.notes[bar.idx[0]] : null;
+      const bs = bar.sig || song.timeSig || { beats:4, unit:4 };
+      if (!curSig || bs.beats !== curSig.beats || bs.unit !== curSig.unit){
+        out += T(bs); curSig = bs;
+      }
+      if (head && head.repStart) out += "{";
+      if (head && head.ending)   out += "N" + head.ending;
+
+      const chords = bar.idx.map(i => sec.notes[i].chord).filter(Boolean);
+      out += chords.length ? chords.map(c => unIrealChord(c) + "XyQ").join("") : " ";
+
+      if (head && head.repEnd) out += "}";
+      const last = sx === secs.length - 1 && bx === bars.length - 1;
+      out += last ? " Z" : "|";
+    });
+  });
+  return out;
+}
+
+// The full irealb:// link for the current song.
+function irealLink(){
+  const w = (song.artist || "").trim().split(/\s+/).filter(Boolean);
+  const composer = w.length === 2 ? w[1] + " " + w[0] : (song.artist || "").trim();
+  const bpm = Math.max(30, Math.min(300, Math.round(song.tempo || 90)));
+  const style = "Medium Swing";
+  const payload = [
+    (song.title || "Untitled").replace(/=/g, " "),
+    composer.replace(/=/g, " ") || " ",
+    style,
+    KEYS.some(k => k.id === song.key) ? song.key : "C",
+    IREAL_PREFIX + irealUnscramble(irealBody()),
+    style,
+    bpm,
+    1
+  ].join("=");
+  return "irealb://" + encodeURIComponent(payload);
+}
+
+// Wrapped the way iReal Pro's own .html export is, so it opens by drag (Mac)
+// or by tapping the link (iOS).
+function irealHtml(){
+  const link = irealLink();
+  const title = esc(song.title || "Untitled");
+  const who = esc((song.artist || "").trim());
+  return `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta name="viewport" content="width=device-width, minimum-scale=1, maximum-scale=1" />
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <title>iReal Pro</title>
+  </head>
+  <body style="color: rgb(230, 227, 218); background-color: rgb(27, 39, 48); font-family: Helvetica,Arial,sans-serif;">
+    <br/><br/>
+    <h3><a href="${link}">${title}</a>${who ? " - " + who : ""}<br/></h3>
+    <br/>Exported from Threeline
+    <br/><br/><span style="font-size:small;color:#999">Open in iReal Pro — drag this file onto the app on Mac, or tap the link on iOS.</span>
+  </body>
+</html>
+`;
+}
+
+function irealName(){
+  const base = (song.title && song.title !== "Untitled" ? song.title : "chords")
+    .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return (base || "chords") + ".html";
+}
+
+async function exportIreal(){
+  let html;
+  try { html = irealHtml(); }
+  catch (err){ alert("Could not build the iReal Pro chart:\n" + (err && err.message ? err.message : err)); return; }
+  const blob = new Blob([html], { type:"text/html" });
+  if (CAN_PICK){
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: irealName(),
+        types: [{ description:"iReal Pro chart", accept:{ "text/html":[".html"] } }],
+        id: PICK_IREAL,
+        ...(irealHandle ? { startIn: irealHandle } : {})
+      });
+      const w = await handle.createWritable();
+      await w.write(blob); await w.close();
+      irealHandle = handle;
+      say("Saved " + handle.name + " — the chords and form, no bass line. Open it in iReal Pro.");
+      return;
+    } catch (err){ if (err && err.name === "AbortError") return; }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = irealName();
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  say("Exported " + a.download + " — the chords and form, no bass line. "
+      + "Open it in iReal Pro (drag onto the app on Mac, or tap the link on iOS).");
+}
+
 async function exportMidi(){
   const data = midiBytes();
   if (!data){ return; }
@@ -5896,11 +6058,12 @@ let fileName = "";
 let savedText = null;      // last written text; null means "not known yet"
 let savedAt = null;        // when it was last written, this session
 let midiHandle = null;     // the last MIDI written, so the next one starts there
+let irealHandle = null;    // likewise for an iReal Pro chart
 
 // Chrome keeps the folder you last used against whichever `id` the picker was
 // given, and remembers it across sessions. Two ids rather than one, so writing
 // a MIDI somewhere does not drag the next Save over to that folder as well.
-const PICK_SONG = "threeline-song", PICK_MIDI = "threeline-midi";
+const PICK_SONG = "threeline-song", PICK_MIDI = "threeline-midi", PICK_IREAL = "threeline-ireal";
 
 // A file handle survives a reload if it is kept in IndexedDB — localStorage
 // cannot hold one. The browser still asks permission before the next write,
@@ -6208,7 +6371,32 @@ $("#btnFull").addEventListener("click", toggleReading);
 $("#btnPractice").addEventListener("click", () => { if (!practice) setPractice(true); });
 $("#btnEdit").addEventListener("click", () => { if (practice) setPractice(false); });
 $("#btnPanel").addEventListener("click", togglePanel);
-$("#btnMidi").addEventListener("click", exportMidi);
+const exportMenu = $("#exportMenu");
+function closeExportMenu(){ exportMenu.hidden = true; }
+$("#btnExport").addEventListener("click", e => {
+  if (!exportMenu.hidden){ closeExportMenu(); return; }
+  const hasChords = song.sections.some(s => !s.ref && s.notes.some(n => n.chord));
+  const irealItem = exportMenu.querySelector('[data-export="ireal"]');
+  irealItem.disabled = !hasChords;
+  irealItem.title = hasChords ? "" : "Put chord symbols on the piece first — an iReal Pro chart is only chords";
+  const r = e.currentTarget.getBoundingClientRect();
+  exportMenu.style.left = Math.round(r.left) + "px";
+  exportMenu.style.top  = Math.round(r.bottom + 4) + "px";
+  exportMenu.hidden = false;
+});
+exportMenu.addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b || b.disabled) return;
+  closeExportMenu();
+  if (b.dataset.export === "midi") exportMidi();
+  else if (b.dataset.export === "ireal") exportIreal();
+});
+document.addEventListener("mousedown", e => {
+  if (!exportMenu.hidden && !exportMenu.contains(e.target) && e.target !== $("#btnExport"))
+    closeExportMenu();
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeExportMenu(); });
+window.addEventListener("blur", closeExportMenu);
 $("#rExit").addEventListener("click", leaveReading);
 $("#rPlay").addEventListener("click", togglePlayback);
 $("#rLoop").addEventListener("click", toggleLoop);
