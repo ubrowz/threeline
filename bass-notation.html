@@ -251,6 +251,17 @@
     zoom:var(--read-zoom,1.4);
   }
   body.reading .sectionhead{ border-color:transparent !important }
+  /* Two columns, so a whole piece can sit on one screen. Each column is the
+     width a system is drawn at (CONTENT_W), so nothing is redrawn; a system is
+     never split between the two, and a heading stays with what follows it. A
+     page break here would break the column, so it goes back to being a marker. */
+  body.reading.cols2 .page{
+    width:calc(2 * 740px + 56px + 48px);
+    column-count:2; column-gap:56px; column-fill:balance;
+  }
+  body.reading.cols2 .songhead{ column-span:all }
+  body.reading.cols2 .sectionhead{ break-after:avoid }
+  body.reading.cols2 .pagebreak{ break-before:auto; page-break-before:auto }
   /* the staff lines edit; the note bands only select. Only the first is locked. */
   body.reading .system .hitstr{ pointer-events:none }
   .readbar{
@@ -340,6 +351,7 @@
     }
     body.reading .readbar .btn{ padding:8px 10px }
     body.reading .readbar > span:not([id]){ display:none }  /* the 4px spacers; #rZoom kept */
+    body.reading #rCols, body.reading #rColsNote{ display:none }  /* two columns never fit a phone */
     body.reading .scrollarea{ padding:14px 12px 14px }      /* bar is in flow now */
     body.reading .rotatehint{ display:none }                /* reading mode drops all other chrome too */
 
@@ -612,6 +624,7 @@
           <div><kbd>⌘L</kbd></div><div>loop what you play</div>
           <div><kbd>⌘B</kbd></div><div>click on the beat</div>
           <div><kbd>f</kbd></div><div>full screen, for reading off a stand</div>
+          <div><kbd>c</kbd></div><div>in full screen: one column or two</div>
           <div><kbd>⇧P</kbd></div><div>practice mode — lock the music</div>
           <div><kbd>esc</kbd></div><div>stop playing</div>
           <div><kbd>w</kbd><kbd>h</kbd><kbd>q</kbd><kbd>e</kbd><kbd>s</kbd></div><div>whole · half · quarter · eighth · 16th</div>
@@ -650,6 +663,9 @@
     <button class="btn" id="rOut" title="Smaller (−)">−</button>
     <span class="muted" id="rZoom" style="min-width:46px;text-align:center">140%</span>
     <button class="btn" id="rIn" title="Bigger (+)">+</button>
+    <span style="width:4px"></span>
+    <button class="btn" id="rCols" title="Two columns, so the whole piece fits on the screen — if it is short enough to still read (c)">2 columns</button>
+    <span class="muted" id="rColsNote" hidden>too long — one column</span>
     <span style="width:4px"></span>
     <button class="btn" id="rExit" title="Back to editing (Esc, or f)">Done</button>
   </div>
@@ -2662,6 +2678,7 @@ let metroOn = false, countInOn = false;
 let bassSound = "plain";
 let drumFeel = "off";
 let reading = false, readZoom = 1;
+let readCols = 1, readColsFit = false;   // full screen in one column or two
 let practice = false;      // the music is fixed; only moving about and playing
 let panel = false;         // narrow screens: show the setup column instead of the sheet
 let notation = "tab";      // "tab" | "standard" | "chords" — a Practice-only view, session only
@@ -2677,11 +2694,12 @@ function loadPrefs(){
     drumFeel = DRUM_FEELS[p.drums] !== undefined ? p.drums : "off";
     countInOn = !!p.countIn;
     playRate = Math.max(0.25, Math.min(1, +p.rate || 1));
+    readCols = p.cols === 2 ? 2 : 1;
   } catch(e){}
 }
 function savePrefs(){
   try { localStorage.setItem(PREF_KEY, JSON.stringify(
-    { loop:loopOn, rate:playRate, metro:metroOn, countIn:countInOn, sound:bassSound, drums:drumFeel })); } catch(e){}
+    { loop:loopOn, rate:playRate, metro:metroOn, countIn:countInOn, sound:bassSound, drums:drumFeel, cols:readCols })); } catch(e){}
 }
 
 function ac(){
@@ -4458,6 +4476,8 @@ function setReadZoom(z){
 function fitReading(){
   const page = $("#page");
   if (!page) return;
+  if (readCols === 2 && fitTwoColumns(page)) return;
+  document.body.classList.remove("cols2");
   // Measured against the window rather than the scroll area, because the area's
   // own width moves depending on whether the current zoom has put a scrollbar
   // on it — which is exactly what we are about to change. Nothing else is on
@@ -4465,6 +4485,54 @@ function fitReading(){
   // width comes from its style, since zoom is baked into anything measured.
   const natural = parseFloat(getComputedStyle(page).width);
   setReadZoom(natural ? (innerWidth - 44) / natural : 1.4);
+  updateColsNote();
+}
+
+// Two columns are only worth it when the whole piece then fits on the screen:
+// once it runs off the bottom, the left column carries on at the top of the
+// right one, above where you are looking, and the page turn only scrolls down.
+// So fit it by height as well as width, and give up — back to one column — if
+// that would make the music too small to read off a stand.
+const COLS2_MIN_ZOOM = 0.7;
+
+// A piece short enough for one column to show whole is left in one column, if
+// that is the bigger of the two: whichever shows all of it larger wins.
+function fitTwoColumns(page){
+  const area = $("#scrollarea");
+  const cs = getComputedStyle(area);
+  const roomH = area.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  // Measured at zoom 1: at the page's own width the columns balance the same
+  // whatever zoom is set afterwards, so the height does not depend on it.
+  const wholeAt = () => {
+    const w = parseFloat(getComputedStyle(page).width);
+    const h = page.getBoundingClientRect().height;
+    return Math.floor(Math.min((innerWidth - 44) / w, roomH / h) * 20) / 20;
+  };
+  document.documentElement.style.setProperty("--read-zoom", 1);
+  document.body.classList.remove("cols2");
+  const z1 = wholeAt();
+  document.body.classList.add("cols2");
+  const z2 = wholeAt();
+  const z = Math.max(z1, z2);
+  readColsFit = z >= COLS2_MIN_ZOOM;
+  if (!readColsFit) return false;
+  document.body.classList.toggle("cols2", z2 > z1);
+  setReadZoom(z);
+  updateColsNote();
+  return true;
+}
+
+function updateColsNote(){
+  const b = $("#rCols"), n = $("#rColsNote");
+  if (b) b.classList.toggle("on", readCols === 2);
+  if (n) n.hidden = !(readCols === 2 && !readColsFit);
+}
+
+function toggleReadCols(){
+  readCols = readCols === 2 ? 1 : 2;
+  savePrefs();
+  fitReading();
+  $("#scrollarea").scrollTop = 0;
 }
 
 // The score's systems are drawn at a fixed 820px page, wider than a phone held
@@ -4491,7 +4559,7 @@ function enterReading(){
 function leaveReading(){
   if (!reading) return;
   reading = false;
-  document.body.classList.remove("reading");
+  document.body.classList.remove("reading", "cols2");
   if (document.fullscreenElement && document.exitFullscreen)
     document.exitFullscreen().catch(() => {});
   updateTransport();
@@ -5552,6 +5620,7 @@ document.addEventListener("keydown", e => {
     if (k === "f" || k === "F"){ e.preventDefault(); leaveReading(); return; }
     if (k === "+" || k === "="){ e.preventDefault(); setReadZoom(readZoom + 0.1); return; }
     if (k === "-" || k === "_"){ e.preventDefault(); setReadZoom(readZoom - 0.1); return; }
+    if (k === "c" || k === "C"){ e.preventDefault(); toggleReadCols(); return; }
     if (k === "ArrowLeft" || k === "ArrowRight"){
       e.preventDefault(); stepCursor(k === "ArrowRight" ? 1 : -1, e.shiftKey); return;
     }
@@ -6402,6 +6471,7 @@ $("#rPlay").addEventListener("click", togglePlayback);
 $("#rLoop").addEventListener("click", toggleLoop);
 $("#rIn").addEventListener("click", () => setReadZoom(readZoom + 0.1));
 $("#rOut").addEventListener("click", () => setReadZoom(readZoom - 0.1));
+$("#rCols").addEventListener("click", toggleReadCols);
 $("#fMetro").addEventListener("change", e => setMetro(e.target.checked));
 $("#fSound").addEventListener("change", e => setSound(e.target.value));
 $("#fDrums").addEventListener("change", e => setDrums(e.target.value));
