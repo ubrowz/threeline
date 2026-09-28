@@ -597,16 +597,17 @@
       <div class="card card--practice">
         <h3>Score</h3>
         <div class="row"><label>Show as</label>
-          <select class="fld" id="fNotation" title="Three rows, standard notation on a bass clef, or just the chords. Practice only, and not saved — it does not touch the fingering.">
+          <select class="fld" id="fNotation" title="Three rows, standard notation on a bass clef, just the chords, or the chords over the words. Practice only, and not saved — it does not touch the fingering.">
             <option value="tab">Tab — three rows</option>
             <option value="standard">Standard — bass clef</option>
             <option value="chords">Chords — changes only</option>
+            <option value="lyrics">Chords + lyrics</option>
           </select>
         </div>
         <div class="row"><label>Key</label>
           <select class="fld" id="fKey" title="Key of the piece. Sets the key signature and how notes are spelled in the standard view. Saved with the song; the tab view is unaffected."></select>
         </div>
-        <div class="muted" style="margin-top:7px">The key is saved with the song. Standard and Chords are read-only — switch to Edit to change the fingering. Chords shows just the changes, packed wide, to improvise over.</div>
+        <div class="muted" style="margin-top:7px">The key is saved with the song. Standard and Chords are read-only — switch to Edit to change the fingering. Chords shows just the changes, packed wide, to improvise over; Chords + lyrics puts each chord over the word it lands on.</div>
       </div>
 
       <div class="card">
@@ -2291,15 +2292,20 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
 // grid to improvise a bass line over. No staff, no rhythm, no lyrics, no names.
 // layoutSection has been told to pack wide. The same `.hit` rects as the other
 // views go out, so the playhead, cursor and selection carry over untouched.
+//
+// "Chords + lyrics" is the same grid with the words under it (opts.lyrics).
+// Then every chord sits over the note it falls on rather than in the middle of
+// the bar, so it lines up with its syllable, the way a lead sheet has it.
 function drawChordSystem(secIdx, sec, sys, barNo, opts){
   const notes = sec.notes;
-  const showEnds = opts.showEnds;
+  const showEnds = opts.showEnds, lyrics = !!opts.lyrics;
 
   const voltaBand = showEnds ? VOLTA_BAND : 0;
   const top   = voltaBand + 4;
-  const ROW_H = 44;
-  const yTop = 2, yBot = ROW_H - 2, midY = ROW_H / 2 + 5;
-  const bodyH = ROW_H + 4;
+  const ROW_H = lyrics ? 56 : 44;
+  const yTop = 2, yBot = ROW_H - 2, midY = lyrics ? 22 : ROW_H / 2 + 5;
+  const lyricY = 45;
+  const bodyH = ROW_H + (lyrics ? 12 : 4);   // words need a line of air under them
   const H = bodyH + top;
   const W = CONTENT_W + 4;
   const selY = 1, selH = ROW_H - 2;
@@ -2357,12 +2363,25 @@ function drawChordSystem(secIdx, sec, sys, barNo, opts){
   // the chords, and a hit rect over every note so the playhead lands
   for (const m of sys.measures){
     const cells = [];
+    let words = false;
     for (const it of m.items){
       const n = notes[it.i];
-      if (n.chord) cells.push({ chord: n.chord, cx: m.x + it.x + it.w / 2 });
+      const cx = m.x + it.x + it.w / 2;
+      if (n.chord) cells.push({ chord: n.chord, cx });
+      if (lyrics && n.lyric){
+        words = true;
+        s += `<text x="${cx}" y="${lyricY}" text-anchor="middle" font-size="13" `
+           + `font-family="system-ui,-apple-system,sans-serif" fill="#33383f">${esc(n.lyric)}</text>`;
+      }
       s += `<rect class="hit" x="${m.x + it.x}" y="${selY}" width="${it.w}" height="${selH}" data-sec="${secIdx}" data-i="${it.i}"/>`;
     }
-    if (!cells.length){
+    if (lyrics){
+      for (const c of cells)
+        s += `<text x="${c.cx}" y="${midY}" text-anchor="middle" font-size="13.5" font-weight="700" `
+           + `font-family="system-ui,-apple-system,sans-serif" fill="#1b1d21">${esc(c.chord)}</text>`;
+      if (!cells.length && !words)
+        s += `<circle cx="${m.x + m.w / 2}" cy="${ROW_H / 2}" r="1.6" fill="#c9ccd2"/>`;
+    } else if (!cells.length){
       s += `<circle cx="${m.x + m.w / 2}" cy="${midY - 4}" r="1.6" fill="#c9ccd2"/>`;
     } else if (cells.length === 1){
       s += `<text x="${m.x + m.w / 2}" y="${midY}" text-anchor="middle" font-size="15" font-weight="700" `
@@ -2417,6 +2436,7 @@ function render(){
 
   const chordView = practice && notation === "chords";
   const stdView   = practice && notation === "standard";
+  const lyricView = practice && notation === "lyrics";
 
   song.sections.forEach((sec, si) => {
     if (sec.ref){
@@ -2431,7 +2451,10 @@ function render(){
     const showTups   = sec.notes.some(n => n.tup);
     const showEnds   = sec.notes.some(n => n.ending);
     const showExpr   = sec.notes.some(n => n.expr);
-    const systems = layoutSection(sec, chordView ? 8 : 0);   // Chords view packs wide
+    // Chords view packs wide; so does Chords + lyrics where there are no words to
+    // make room for. Where there are, the words set the width, as in the tab.
+    const lyricRow = lyricView && showLyrics;
+    const systems = layoutSection(sec, chordView || (lyricView && !lyricRow) ? 8 : 0);
 
     // A page break sits on the first note of a bar; a bar carrying one always
     // begins a system (see layoutSection). When that system is the section's
@@ -2448,8 +2471,8 @@ function render(){
       + `title="Name this part of the song — Intro, Verse, Chorus. It is printed above the music.">`;
     systems.forEach((sys, k) => {
       const brk = k > 0 && opensPage(sys) ? " pagebreak" : "";
-      const svg = chordView
-        ? drawChordSystem(si, sec, sys, barNo, { showEnds })
+      const svg = chordView || lyricView
+        ? drawChordSystem(si, sec, sys, barNo, { showEnds, lyrics: lyricRow })
         : stdView
         ? drawStaffSystem(si, sec, sys, barNo, { showLyrics, showChords, showTups, showEnds, showExpr })
         : drawSystem(si, sec, sys, showLyrics, showChords, barNo, showTups, showEnds, showExpr);
@@ -2681,8 +2704,8 @@ let reading = false, readZoom = 1;
 let readCols = 1, readColsFit = false;   // full screen in one column or two
 let practice = false;      // the music is fixed; only moving about and playing
 let panel = false;         // narrow screens: show the setup column instead of the sheet
-let notation = "tab";      // "tab" | "standard" | "chords" — a Practice-only view, session only
-function setNotation(v){ notation = (v === "standard" || v === "chords") ? v : "tab"; render(); }
+let notation = "tab";      // "tab" | "standard" | "chords" | "lyrics" — a Practice-only view, session only
+function setNotation(v){ notation = ["standard", "chords", "lyrics"].includes(v) ? v : "tab"; render(); }
 const PREF_KEY = "bass-notation-prefs";
 
 function loadPrefs(){
