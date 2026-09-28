@@ -664,7 +664,7 @@
     <span class="muted" id="rZoom" style="min-width:46px;text-align:center">140%</span>
     <button class="btn" id="rIn" title="Bigger (+)">+</button>
     <span style="width:4px"></span>
-    <button class="btn" id="rCols" title="Two columns, so the whole piece fits on the screen — if it is short enough to still read (c)">2 columns</button>
+    <button class="btn" id="rCols" title="Two columns, so the whole piece fits on the screen, shrunk as far as it takes (c)">2 columns</button>
     <span class="muted" id="rColsNote" hidden>too long — one column</span>
     <span style="width:4px"></span>
     <button class="btn" id="rExit" title="Back to editing (Esc, or f)">Done</button>
@@ -4491,9 +4491,10 @@ function fitReading(){
 // Two columns are only worth it when the whole piece then fits on the screen:
 // once it runs off the bottom, the left column carries on at the top of the
 // right one, above where you are looking, and the page turn only scrolls down.
-// So fit it by height as well as width, and give up — back to one column — if
-// that would make the music too small to read off a stand.
-const COLS2_MIN_ZOOM = 0.7;
+// So fit it by height as well as width, shrinking as far as the zoom goes —
+// whether that is still readable is for the player to judge, and + is there
+// if not. Only a piece too long even for that goes back to one column.
+const COLS2_MIN_ZOOM = 0.4;
 
 // A piece short enough for one column to show whole is left in one column, if
 // that is the bigger of the two: whichever shows all of it larger wins.
