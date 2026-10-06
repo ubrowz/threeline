@@ -536,6 +536,15 @@
         <div class="muted" style="margin-top:7px">Insert drops an empty bar after the one you’re in and shifts the rest right. New bars arrive as rests — type frets over them.</div>
       </div>
 
+      <div class="card card--edit">
+        <h3>Transpose</h3>
+        <div class="grid">
+          <button class="btn" id="btnShiftDown" title="The whole song one fret lower">− 1 fret</button>
+          <button class="btn" id="btnShiftUp" title="The whole song one fret higher">+ 1 fret</button>
+        </div>
+        <div class="muted" style="margin-top:7px">The whole song, a fret at a time, on the strings it is on. Chords and key move with it. A note that would leave the neck goes to another string, or an octave over if no string can reach it.</div>
+      </div>
+
       <div class="card">
         <h3>Sections</h3>
         <div class="seclist" id="seclist"></div>
@@ -1070,6 +1079,91 @@ function retune(next){
   }
   song.tuning = next.slice();
   refreshMetrics();
+}
+
+// Shift the whole song by `by` frets (semitones). Every note stays on its
+// string where it can, so the hand shape is kept. One that would go past the nut
+// or the 24th fret moves to the string where that pitch sits nearest to where
+// the hand would have been; only a pitch no string reaches moves an octave.
+// Chord symbols and the key go with it, so the changes still fit the notes.
+function transposeSong(by){
+  const t = tuning(), lo = t[0], hi = t[t.length - 1] + 24;
+  const tally = { string:0, octave:0, dropped:0 };
+
+  const place = (v, taken) => {
+    const want = v.fret + by;
+    if (want >= 0 && want <= 24 && !taken.has(v.string)) return { string:v.string, fret:want };
+    let midi = voiceMidi(v) + by, over = 0;      // an octave moves where the hand aims too
+    while (midi < lo){ midi += 12; over += 12; }
+    while (midi > hi){ midi -= 12; over -= 12; }
+    const octave = over !== 0;
+    const near = Math.max(0, Math.min(24, want + over));
+    let best = null;
+    for (let s = 0; s < t.length; s++){
+      const f = midi - t[s];
+      if (taken.has(s) || f < 0 || f > 24) continue;
+      const cost = Math.abs(f - near) * 10 + Math.abs(s - v.string);   // the fret first, then the nearer string
+      if (!best || cost < best.cost) best = { string:s, fret:f, cost };
+    }
+    if (!best) return null;                       // a double stop with no string left for this voice
+    tally[octave ? "octave" : "string"]++;
+    return { string:best.string, fret:best.fret };
+  };
+
+  // the key, by its tonic; of two spellings of the same key the one with fewer
+  // accidentals, and on the tie (F#/Gb) the one in the direction of travel
+  const tonic = f => ((f * 7) % 12 + 12) % 12;
+  const pc = (tonic(keyFifths()) + by % 12 + 12) % 12;
+  const key = KEYS.filter(k => tonic(k.fifths) === pc)
+    .sort((a, b) => Math.abs(a.fifths) - Math.abs(b.fifths) || (by > 0 ? b.fifths - a.fifths : a.fifths - b.fifths))[0];
+
+  const prefer = key.fifths > 0 ? "sharp" : key.fifths < 0 ? "flat" : "def";
+  // A root keeps its own language: Bes stays Dutch, Bb English; a plain letter
+  // takes the song's.
+  const spell = (name, rootPc) => {
+    const lang = /^(As|Es)$|[ie]s$/.test(name) ? "nl" : /^[A-H][#b]$/.test(name) ? "en"
+               : (NAMING[song.naming] ? song.naming : "nl");
+    return NAMING[lang][prefer][((rootPc + by) % 12 + 12) % 12];
+  };
+  const shiftChord = sym => {
+    const c = parseChord(sym);
+    if (!c) return sym;                           // N.C., or anything not read as a chord
+    const [head, ...over] = sym.split("/");
+    const lead = head.match(/^\s*/)[0];
+    let out = lead + spell(c.rootName, c.rootPc) + head.slice(lead.length + c.rootName.length);
+    if (over.length){
+      const b = matchRoot(over[0].trim());
+      out += "/" + (b ? over[0].replace(b[0], spell(b[0], b[1])) : over[0]);
+      if (over.length > 1) out += "/" + over.slice(1).join("/");
+    }
+    return out;
+  };
+
+  pushUndo();
+  for (const sec of song.sections){
+    for (const n of sec.notes){
+      if (n.chord) n.chord = shiftChord(n.chord);
+      if (n.rest) continue;
+      const taken = new Set(), voices = [];
+      for (const v of gripVoices(n)){
+        const r = place(v, taken);
+        if (!r){ tally.dropped++; continue; }
+        taken.add(r.string); voices.push(r);
+      }
+      setGrip(n, voices);
+    }
+  }
+  song.key = key.id;
+  syncFields();
+  render();
+
+  const notes = k => k + " note" + (k === 1 ? "" : "s");
+  const bits = [];
+  if (tally.string)  bits.push(notes(tally.string) + " moved to another string");
+  if (tally.octave)  bits.push(notes(tally.octave) + " moved an octave to stay on the neck");
+  if (tally.dropped) bits.push(notes(tally.dropped) + " of a double stop dropped, with no string left to put it on");
+  say("Shifted " + (by > 0 ? "up " : "down ") + Math.abs(by) + " fret" + (Math.abs(by) === 1 ? "" : "s")
+      + (bits.length ? " — " + bits.join(", ") + "." : "."));
 }
 
 function nameOf(n){
@@ -6059,6 +6153,8 @@ $("#btnAddMeasure").addEventListener("click", addMeasure);
 $("#btnDelMeasure").addEventListener("click", deleteMeasure);
 $("#btnInsMeasure").addEventListener("click", insertMeasure);
 $("#btnSplitSection").addEventListener("click", splitSection);
+$("#btnShiftUp").addEventListener("click", () => transposeSong(+1));
+$("#btnShiftDown").addEventListener("click", () => transposeSong(-1));
 
 /* ---------- song fields ---------- */
 $("#fTitle").addEventListener("input", e => { pushUndo("title"); song.title = e.target.value; render(); });
