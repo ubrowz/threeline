@@ -550,6 +550,7 @@
         <div class="seclist" id="seclist"></div>
         <div class="grid card--edit" style="margin-top:8px">
           <button class="btn" id="btnSplitSection" title="Start a new section after the selected note (⇧S)">Split here</button>
+          <button class="btn" id="btnJoinSection" title="Glue this section onto the end of the one before it — the undo of Split here (⇧J)">Join</button>
           <button class="btn" id="btnAddSection" title="Add an empty section at the end">+ Section</button>
           <button class="btn" id="btnAddRef" title="Add a name-only section, for a part that repeats">+ Reference</button>
         </div>
@@ -650,6 +651,7 @@
           <div><kbd>⇧M</kbd></div><div>delete this bar</div>
           <div><kbd>i</kbd></div><div>insert a bar after this one</div>
           <div><kbd>⇧S</kbd></div><div>split off a new section here</div>
+          <div><kbd>⇧J</kbd></div><div>join this section onto the one before</div>
           <div><kbd>⇧↵</kbd></div><div>start a new line at this bar</div>
           <div><kbd>p</kbd></div><div>start a new page at this bar</div>
           <div><kbd>[</kbd> <kbd>]</kbd></div><div>open / close a repeat</div>
@@ -2595,6 +2597,8 @@ function octHint(){
 }
 
 function renderSidebar(){
+  const jb = $("#btnJoinSection");
+  if (jb) jb.disabled = !canJoinSection();
   renderChordPanel();
   $("#octHint").innerHTML = octHint();
 
@@ -5571,6 +5575,28 @@ function splitSection(){
   if (head){ head.focus(); head.select(); }
 }
 
+// The way back from Split here: the cursor's section goes onto the end of the
+// one before it, which keeps its own name. The notes re-bar across the old seam.
+// A name-only reference on either side has no notes to glue, so it is left be.
+function canJoinSection(){
+  const prev = song.sections[cursor.sec - 1], sec = song.sections[cursor.sec];
+  return !!(prev && sec && !prev.ref && !sec.ref);
+}
+
+function joinSection(){
+  if (!canJoinSection()) return;
+  pushUndo();
+  const prev = song.sections[cursor.sec - 1];
+  const at = prev.notes.length;
+  prev.notes.push(...song.sections[cursor.sec].notes);
+  song.sections.splice(cursor.sec, 1);
+  cursor.sec -= 1;
+  cursor.i = Math.min(at, Math.max(0, prev.notes.length - 1));
+  selAnchor = null;
+  pendingFret = null;
+  render();
+}
+
 // Remove the bar the cursor is in. Everything after it shifts back, so the
 // remaining notes re-bar themselves.
 function deleteMeasure(){
@@ -5856,6 +5882,7 @@ document.addEventListener("keydown", e => {
     case "P":            e.preventDefault(); togglePractice(); break;
     case "p":            e.preventDefault(); togglePageBreak(); break;
     case "S":           e.preventDefault(); splitSection(); break;
+    case "J":           e.preventDefault(); joinSection(); break;
     case "[":           e.preventDefault(); toggleRepeat("repStart"); break;
     case "]":           e.preventDefault(); toggleRepeat("repEnd"); break;
     case "Enter":       e.preventDefault(); e.shiftKey ? toggleBreak() : addMeasure(); break;
@@ -6153,6 +6180,7 @@ $("#btnAddMeasure").addEventListener("click", addMeasure);
 $("#btnDelMeasure").addEventListener("click", deleteMeasure);
 $("#btnInsMeasure").addEventListener("click", insertMeasure);
 $("#btnSplitSection").addEventListener("click", splitSection);
+$("#btnJoinSection").addEventListener("click", joinSection);
 $("#btnShiftUp").addEventListener("click", () => transposeSong(+1));
 $("#btnShiftDown").addEventListener("click", () => transposeSong(-1));
 
