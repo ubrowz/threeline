@@ -1512,7 +1512,16 @@ function layoutSection(sec, forceBpl){
       items.push({ i, x, w });
       x += w;
     }
-    return { items, w: Math.max(MEASURE_MIN_W, x + padR), x: 0, first,
+    const w = Math.max(MEASURE_MIN_W, x + padR);
+    // How far the bar may be squeezed before a lyric runs into its neighbour.
+    // Notes squeeze evenly, so the tightest word sets it. Nothing else counts:
+    // fret numbers and beams tolerate a squeeze, words do not.
+    let minScale = 0;
+    for (const it of items){
+      const ly = notes[it.i].lyric;
+      if (ly) minScale = Math.max(minScale, (textW(ly, FONT_LYRIC) + 8) / it.w);
+    }
+    return { items, w, minW: w * Math.min(1, minScale), x: 0, first,
              sig:m.sig, showSig, sigX: padL - sigW / 2 };
   });
 
@@ -1520,27 +1529,54 @@ function layoutSection(sec, forceBpl){
 
   // Pack measures into systems. A fixed bars-per-line is authoritative: the
   // bars are rescaled to fit the width below, so natural width must NOT also
-  // break the line — doing both is what left short, half-filled rows.
+  // break the line — doing both is what left short, half-filled rows. Words
+  // are the exception: a line whose lyrics cannot be squeezed into the width
+  // takes fewer bars (see minW), since overlapping words cannot be read.
   const systems = [];
-  let cur = [], used = 0;
+  let cur = [], used = 0, need = 0;
   for (const m of measures){
     const manual = m.first >= 0 && (notes[m.first].brk || notes[m.first].pageBrk);
-    const full = bpl ? cur.length >= bpl : used + m.w > CONTENT_W;
+    const full = bpl ? cur.length >= bpl || need + m.minW > CONTENT_W
+                     : used + m.w > CONTENT_W;
     if (cur.length && (manual || full)){
-      systems.push({ measures:cur, used }); cur = []; used = 0;
+      systems.push({ measures:cur, used, crowded: bpl && cur.length < bpl && !manual });
+      cur = []; used = 0; need = 0;
     }
-    cur.push(m); used += m.w;
+    cur.push(m); used += m.w; need += m.minW;
   }
   if (cur.length) systems.push({ measures:cur, used });
 
+  // Fixed bars-per-line: the width of each bar. Normally an even share, like
+  // ruled paper. Where words need more than that, those bars get what they
+  // need and the rest share what is left, evenly.
+  const bplWidths = sys => {
+    const ms = sys.measures, k = ms.length;
+    const minSum = ms.reduce((a, m) => a + m.minW, 0);
+    // a line cut short by its words still runs to the margin; a short last line
+    // keeps its bars at the usual width, unless its words need more
+    const total = sys.crowded ? CONTENT_W : Math.min(CONTENT_W, Math.max(CONTENT_W / bpl * k, minSum));
+    const out = new Array(k).fill(0);
+    let left = total, free = ms.map((_, i) => i);
+    for (;;){
+      const share = left / free.length;
+      const big = free.filter(i => ms[i].minW > share);
+      if (!big.length){ for (const i of free) out[i] = share; break; }
+      for (const i of big){ out[i] = ms[i].minW; left -= ms[i].minW; }
+      free = free.filter(i => !big.includes(i));
+      if (!free.length) break;
+    }
+    return out;
+  };
+
   systems.forEach((sys, si) => {
     let x = 0;
-    for (const m of sys.measures){
+    const widths = bpl ? bplWidths(sys) : null;
+    sys.measures.forEach((m, mi) => {
       // Fixed bars-per-line gives every bar the same width, like ruled paper.
       // Otherwise stretch the system to the margin, leaving the last one short.
       let scale;
       if (bpl){
-        scale = (CONTENT_W / bpl) / m.w;
+        scale = widths[mi] / m.w;
       } else if (sys.used <= 0){
         scale = 1;
       } else if (si === systems.length - 1){
@@ -1555,7 +1591,7 @@ function layoutSection(sec, forceBpl){
       for (const it of m.items){ it.x *= scale; it.w *= scale; }
       m.sigX *= scale;
       x += m.w;
-    }
+    });
     sys.width = x;
   });
   return systems;
