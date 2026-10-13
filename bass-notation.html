@@ -1339,8 +1339,19 @@ function stemEnd(yFar, yNear, down){
 const DIRECTIONS = [
   "staccato", "legato", "marcato", "dolce", "simile",
   "let ring", "palm mute", "slap", "with a pick",
-  "pizz.", "arco", "rit.", "accel.", "a tempo", "ad lib."
+  "pizz.", "arco", "rit.", "accel.", "a tempo", "ad lib.",
+  "pp", "p", "mp", "mf", "f", "ff"
 ];
+// Dynamics are letters, not words, and are engraved as such: bold, italic, in
+// a serif face, a touch larger. The rest stay plain italic.
+const DYNAMICS = new Set(["pp", "p", "mp", "mf", "f", "ff"]);
+function exprText(x, y, expr){
+  const dyn = DYNAMICS.has(expr);
+  return `<text x="${x}" y="${y}" font-size="${dyn ? 14 : 12}" font-style="italic" `
+       + (dyn ? `font-weight="700" font-family="Georgia,'Times New Roman',serif" fill="#1b1d21">`
+              : `font-family="system-ui,-apple-system,sans-serif" fill="#33383f">`)
+       + `${esc(expr)}</text>`;
+}
 // The numerals are stacked, so the width is set by the wider of the two.
 function sigWidth(sig){
   const t = theSig(sig);
@@ -2035,8 +2046,7 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
       // Left-aligned rather than centred: printed expression text starts at its
       // note and runs on, which is what keeps it from stretching the bar.
       if (showExpr && n.expr)
-        s += `<text x="${cx - 2}" y="${EXPR_Y}" font-size="12" font-style="italic" `
-           + `font-family="system-ui,-apple-system,sans-serif" fill="#33383f">${esc(n.expr)}</text>`;
+        s += exprText(cx - 2, EXPR_Y, n.expr);
 
       // --- chord row, above everything ---
       if (showChords && n.chord){
@@ -2273,8 +2283,7 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
           s += `<text x="${cx}" y="${CHORD_Y - tupBand}" text-anchor="middle" font-size="13" font-weight="700" `
              + `font-family="system-ui,-apple-system,sans-serif" fill="#1b1d21">${esc(n.chord)}</text>`;
         if (showExpr && n.expr)
-          s += `<text x="${cx - 2}" y="${exprY}" font-size="12" font-style="italic" `
-             + `font-family="system-ui,-apple-system,sans-serif" fill="#33383f">${esc(n.expr)}</text>`;
+          s += exprText(cx - 2, exprY, n.expr);
         s += `<rect class="hit" x="${mapX(m.x + it.x)}" y="${selY}" width="${it.w * xScale}" height="${selH}" data-sec="${secIdx}" data-i="${it.i}"/>`;
         continue;
       }
@@ -2400,8 +2409,7 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
         s += `<text x="${cx}" y="${CHORD_Y - tupBand}" text-anchor="middle" font-size="13" font-weight="700" `
            + `font-family="system-ui,-apple-system,sans-serif" fill="#1b1d21">${esc(n.chord)}</text>`;
       if (showExpr && n.expr)
-        s += `<text x="${cx - 2}" y="${exprY}" font-size="12" font-style="italic" `
-           + `font-family="system-ui,-apple-system,sans-serif" fill="#33383f">${esc(n.expr)}</text>`;
+        s += exprText(cx - 2, exprY, n.expr);
       if (showLyrics && n.lyric)
         s += `<text x="${cx}" y="${lyricY}" text-anchor="middle" font-size="12" `
            + `font-family="system-ui,-apple-system,sans-serif" fill="#33383f">${esc(n.lyric)}</text>`;
