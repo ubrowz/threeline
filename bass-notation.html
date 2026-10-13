@@ -518,6 +518,12 @@
 
       <div class="card card--edit">
         <h3>Note</h3>
+        <div class="row"><label>Type</label>
+          <div class="grid" style="flex:1">
+            <button class="btn" id="btnTypeFrets" style="flex:1" title="Digits are fret numbers, on the string you are on (⇧E switches)">frets</button>
+            <button class="btn" id="btnTypeNames" style="flex:1" title="Letters are note names — c d e f g a b, then # or b; the string and fret are picked for you (⇧E switches)">note names</button>
+          </div>
+        </div>
         <div id="inspector"></div>
       </div>
 
@@ -653,6 +659,12 @@
           <div><kbd>i</kbd></div><div>insert a bar after this one</div>
           <div><kbd>⇧S</kbd></div><div>split off a new section here</div>
           <div><kbd>⇧J</kbd></div><div>join this section onto the one before</div>
+          <div><kbd>⇧E</kbd></div><div>type frets, or type note names</div>
+          <div><kbd>c</kbd>…<kbd>b</kbd></div><div>note names: that note, nearest the last one</div>
+          <div><kbd>#</kbd> <kbd>b</kbd> <kbd>=</kbd></div><div>note names: sharp · flat · natural</div>
+          <div><kbd>↑</kbd><kbd>↓</kbd></div><div>note names: an octave up / down</div>
+          <div><kbd>⌥↑</kbd><kbd>⌥↓</kbd></div><div>note names: same note, next string</div>
+          <div><kbd>1</kbd><kbd>2</kbd><kbd>4</kbd><kbd>8</kbd><kbd>6</kbd></div><div>note names: whole · half · quarter · eighth · 16th</div>
           <div><kbd>⇧↵</kbd></div><div>start a new line at this bar</div>
           <div><kbd>p</kbd></div><div>start a new page at this bar</div>
           <div><kbd>[</kbd> <kbd>]</kbd></div><div>open / close a repeat</div>
@@ -2624,6 +2636,9 @@ function octHint(){
 function renderSidebar(){
   const jb = $("#btnJoinSection");
   if (jb) jb.disabled = !canJoinSection();
+  $("#btnTypeFrets").classList.toggle("on", entryMode === "frets");
+  $("#btnTypeNames").classList.toggle("on", entryMode === "names");
+  syncPad();
   renderChordPanel();
   $("#octHint").innerHTML = octHint();
 
@@ -2668,7 +2683,7 @@ function renderSidebar(){
 
   if (!n){
     ins.innerHTML = `
-      <div class="empty" style="margin-bottom:9px">At the end — type a fret number to add a note.</div>
+      <div class="empty" style="margin-bottom:9px">At the end — type ${entryMode === "names" ? "a note name" : "a fret number"} to add a note.</div>
       <div class="row"><label>Length</label><div class="grid" style="flex:1">${durBtns}</div></div>
       <div class="row"><label>String</label>
         <select class="fld" data-str title="Which string to play it on. The pitch changes with it — use the arrow keys, or click a staff line.">${tuning().map((_,i)=>
@@ -2825,6 +2840,7 @@ let bassSound = "plain";
 let drumFeel = "off";
 let reading = false, readZoom = 1;
 let readCols = 1, readColsFit = false;   // full screen in one column or two
+let entryMode = "frets";   // Edit: digits are frets, or ("names") letters are note names
 let practice = false;      // the music is fixed; only moving about and playing
 let panel = false;         // narrow screens: show the setup column instead of the sheet
 let notation = "tab";      // "tab" | "standard" | "treble" | "chords" | "lyrics" — a Practice-only view, session only
@@ -2841,11 +2857,12 @@ function loadPrefs(){
     countInOn = !!p.countIn;
     playRate = Math.max(0.25, Math.min(1, +p.rate || 1));
     readCols = p.cols === 2 ? 2 : 1;
+    entryMode = p.entry === "names" ? "names" : "frets";
   } catch(e){}
 }
 function savePrefs(){
   try { localStorage.setItem(PREF_KEY, JSON.stringify(
-    { loop:loopOn, rate:playRate, metro:metroOn, countIn:countInOn, sound:bassSound, drums:drumFeel, cols:readCols })); } catch(e){}
+    { loop:loopOn, rate:playRate, metro:metroOn, countIn:countInOn, sound:bassSound, drums:drumFeel, cols:readCols, entry:entryMode })); } catch(e){}
 }
 
 function ac(){
@@ -5752,6 +5769,152 @@ function addSection(ref){
    Events — keyboard
    ============================================================ */
 
+/* ---------- typing note names ----------
+   The other way in: c d e f g a b instead of a fret. A name has no octave and
+   no string, so both are chosen — the octave nearest the note before (within a
+   fourth, counted on the staff, as a reader would expect C D E F G to climb),
+   and the string where that pitch sits nearest the hand. A bare letter takes
+   the key signature, as it would on the page: in F, b is B flat. Like a typed
+   fret it fills the slot under the cursor and stays there, so # b = and the
+   octave keys still act on it; Space moves on. */
+const NAME_DUR = { "1":"w", "2":"h", "4":"q", "8":"e", "6":"s" };
+let nameLast = null;      // the note a letter just wrote: { sec, i, letter, nat, alt }
+
+function setEntryMode(m){
+  entryMode = m === "names" ? "names" : "frets";
+  nameLast = null; pendingFret = null;
+  savePrefs();
+  render();
+}
+
+// The sounding notes before the cursor, nearest first — `count` of them.
+function notesBefore(count){
+  const out = [];
+  for (let si = cursor.sec; si >= 0 && out.length < count; si--){
+    const sec = song.sections[si];
+    if (sec.ref) continue;
+    const from = si === cursor.sec ? Math.min(cursor.i, sec.notes.length) : sec.notes.length;
+    for (let j = from - 1; j >= 0 && out.length < count; j--)
+      if (!sec.notes[j].rest && !sec.notes[j].dead) out.push(sec.notes[j]);
+  }
+  return out;
+}
+function nameRef(){ return notesBefore(1)[0] || null; }
+
+// Where the hand is: the frets of the last few notes, open strings aside, and
+// the string of the last one. With nothing before, the low position.
+function handNow(){
+  const recent = notesBefore(3);
+  const frets = recent.map(n => n.fret).filter(f => f > 0);
+  return { frets: frets.length ? frets : [3],
+           string: recent.length ? recent[0].string : entry.string,
+           last: frets.length ? frets[0] : 3 };
+}
+
+// Where on the neck a pitch sits best for the hand: a hand covers four frets,
+// so the spot that needs the least stretch beyond that wins, with an open
+// string nearly free. Then the nearer string, then the nearer fret. The pitch is
+// pulled into the bass's range an octave at a time.
+function placeMidi(midi, hand){
+  const t = tuning(), lo = t[0], hi = t[t.length - 1] + 24;
+  while (midi < lo) midi += 12;
+  while (midi > hi) midi -= 12;
+  const fLo = Math.min(...hand.frets), fHi = Math.max(...hand.frets);
+  let best = null;
+  for (let s = 0; s < t.length; s++){
+    const f = midi - t[s];
+    if (f < 0 || f > 24) continue;
+    const stretch = f === 0 ? 0.5 : Math.max(0, Math.max(fHi, f) - Math.min(fLo, f) - 3);
+    const cost = stretch * 4 + Math.abs(s - hand.string) * 0.5 + Math.abs(f - hand.last) * 0.1;
+    if (!best || cost < best.cost) best = { string:s, fret:f, cost };
+  }
+  return best;
+}
+
+function writeNamed(nat, letter, alt){
+  const spot = placeMidi(nat + alt, handNow());
+  if (!spot) return;
+  pushUndo();
+  const n = ensureSlot();
+  n.rest = false; n.dead = false;
+  setGrip(n, [{ string:spot.string, fret:spot.fret }]);
+  n.spell = alt > 0 ? "sharp" : alt < 0 ? "flat" : null;
+  entry.string = n.string;
+  pendingFret = null;
+  // where the letter really landed, octave-wise, after any pull into range
+  nameLast = { sec:cursor.sec, i:cursor.i, letter, alt, nat: midiOf(n) - alt };
+  render();
+}
+
+function typeName(letter){
+  const fifths = keyFifths(), tab = keySpell(fifths);
+  const ref = nameRef();
+  const refMidi = ref ? midiOf(ref) : tuning()[Math.min(entry.string, NSTR - 1)] + 3;
+  // the reference on the staff: its letter and that letter's octave
+  const rsp = tab[((refMidi % 12) + 12) % 12];
+  const refDia = (Math.floor((refMidi - rsp.alt) / 12) - 1) * 7 + _CL.indexOf(rsp.letter);
+  const li = _CL.indexOf(letter);
+  const oct = Math.round((refDia - li) / 7);          // within three steps either way
+  const nat = (oct + 1) * 12 + _LETTER_PC[letter];
+  writeNamed(nat, letter, keyAlt(letter, fifths));
+}
+
+function nameLastHere(){
+  return nameLast && nameLast.sec === cursor.sec && nameLast.i === cursor.i && curNote() ? nameLast : null;
+}
+
+function alterName(alt){
+  const nl = nameLastHere();
+  if (!nl) return false;
+  writeNamed(nl.nat, nl.letter, alt);
+  return true;
+}
+
+// The same note an octave away, kept near where it is now.
+function shiftOctave(by){
+  const n = curNote();
+  if (!n || n.rest || n.dead) return;
+  const t = tuning(), midi = midiOf(n) + by * 12;
+  if (midi < t[0] || midi > t[t.length - 1] + 24) return;     // off the neck: stay
+  const spot = placeMidi(midi, handNow());
+  pushUndo();
+  const spell = n.spell;
+  setGrip(n, [{ string:spot.string, fret:spot.fret }]);
+  n.spell = spell;
+  entry.string = n.string;
+  if (nameLastHere()) nameLast.nat += by * 12;
+  render();
+}
+
+// The same pitch on the next string over, if it is there.
+function sameNoteNextString(d){
+  const n = curNote();
+  if (!n || n.rest || n.dead) return;
+  const s = n.string + d, f = n.fret + tuning()[n.string] - (tuning()[s] ?? NaN);
+  if (!(s >= 0 && s < NSTR && f >= 0 && f <= 24)) return;
+  pushUndo();
+  const spell = n.spell;
+  setGrip(n, [{ string:s, fret:f }]);
+  n.spell = spell;
+  entry.string = s;
+  render();
+}
+
+// Names mode's keys. True when the key was taken; anything else falls through
+// to the usual shortcuts and ends the run of # b = on the last letter.
+function nameKey(e, k){
+  if (e.altKey && (k === "ArrowUp" || k === "ArrowDown")){ sameNoteNextString(k === "ArrowUp" ? 1 : -1); return true; }
+  if (e.altKey) return false;
+  if (k === "#"){ alterName(+1); return true; }
+  if (k === "="){ alterName(0); return true; }
+  if (k === "b" && alterName(-1)) return true;
+  if (k.length === 1 && "cdefgab".includes(k)){ typeName(k.toUpperCase()); return true; }
+  if (k === "ArrowUp" || k === "ArrowDown"){ shiftOctave(k === "ArrowUp" ? 1 : -1); return true; }
+  if (k >= "0" && k <= "9"){ if (NAME_DUR[k]) setDur(NAME_DUR[k]); return true; }
+  nameLast = null;
+  return false;
+}
+
 const NOTE_KEYS = new Set([
   "0","1","2","3","4","5","6","7","8","9",
   "w","h","q","e","s",".",
@@ -5872,6 +6035,9 @@ document.addEventListener("keydown", e => {
     return;
   }
   if (k === "Escape" && isPlaying()){ e.preventDefault(); stopPlayback(); return; }
+  if (entryMode === "names" && !e.metaKey && !e.ctrlKey && !isRefSection() && nameKey(e, k)){
+    e.preventDefault(); return;
+  }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
 
   // A reference section shows its name only, so notation edits would be invisible.
@@ -5908,6 +6074,7 @@ document.addEventListener("keydown", e => {
     case "p":            e.preventDefault(); togglePageBreak(); break;
     case "S":           e.preventDefault(); splitSection(); break;
     case "J":           e.preventDefault(); joinSection(); break;
+    case "E":           e.preventDefault(); setEntryMode(entryMode === "names" ? "frets" : "names"); break;
     case "[":           e.preventDefault(); toggleRepeat("repStart"); break;
     case "]":           e.preventDefault(); toggleRepeat("repEnd"); break;
     case "Enter":       e.preventDefault(); e.shiftKey ? toggleBreak() : addMeasure(); break;
@@ -6083,11 +6250,34 @@ document.querySelector(".sidebar").addEventListener("input", e => {
   }
 });
 
+// In names mode the digit keys of the pad become the seven letters and the
+// three accidentals, and the string keys move an octave.
+const PAD_NAMES = { "7":"C", "8":"D", "9":"E", "4":"F", "5":"G", "6":"A", "1":"B",
+                    "2":"♯", "3":"♭", "0":"♮", strup:"oct ▲", strdn:"oct ▼" };
+const PAD_FRETS = { strup:"str ▲", strdn:"str ▼" };
+function syncPad(){
+  for (const b of document.querySelectorAll("#editpad [data-pad]")){
+    const p = b.dataset.pad;
+    if (entryMode === "names" && PAD_NAMES[p]) b.textContent = PAD_NAMES[p];
+    else if (/^\d$/.test(p)) b.textContent = p;
+    else if (PAD_FRETS[p]) b.textContent = PAD_FRETS[p];
+  }
+}
+
 // The touch keypad — each key is the tap equivalent of a note-entry shortcut.
 $("#editpad").addEventListener("click", e => {
   const b = e.target.closest("button");
   if (!b || isRefSection() || musicLocked()) return;
   const p = b.dataset.pad;
+  if (entryMode === "names"){
+    const nm = PAD_NAMES[p];
+    if (nm === "♯") return void alterName(+1);
+    if (nm === "♭") return void alterName(-1);
+    if (nm === "♮") return void alterName(0);
+    if (p === "strup") return shiftOctave(+1);
+    if (p === "strdn") return shiftOctave(-1);
+    if (nm) return typeName(nm);
+  }
   if (/^\d$/.test(p))      return typeDigit(+p);
   if (p === "strup")       return nudgeString(+1);
   if (p === "strdn")       return nudgeString(-1);
@@ -6206,6 +6396,8 @@ $("#btnDelMeasure").addEventListener("click", deleteMeasure);
 $("#btnInsMeasure").addEventListener("click", insertMeasure);
 $("#btnSplitSection").addEventListener("click", splitSection);
 $("#btnJoinSection").addEventListener("click", joinSection);
+$("#btnTypeFrets").addEventListener("click", () => setEntryMode("frets"));
+$("#btnTypeNames").addEventListener("click", () => setEntryMode("names"));
 $("#btnShiftUp").addEventListener("click", () => transposeSong(+1));
 $("#btnShiftDown").addEventListener("click", () => transposeSong(-1));
 
