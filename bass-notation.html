@@ -651,6 +651,7 @@
           <div><kbd>x</kbd></div><div>dead / ghost note</div>
           <div><kbd>-</kbd></div><div>hammer / pull → slide → plain</div>
           <div><kbd>,</kbd></div><div>staccato — the other dot key</div>
+          <div><kbd>(</kbd></div><div>slur the selection (play legato), or remove it</div>
           <div><kbd>⇧T</kbd></div><div>split into a triplet, or merge one back</div>
           <div><kbd>t</kbd></div><div>tie to next note</div>
           <div><kbd>n</kbd></div><div>flip sharp ↔ flat spelling</div>
@@ -822,6 +823,8 @@ function newNote(o){
     tie:false,            // tied into the following note
     dead:false,           // ghost / muted note, drawn as x
     stac:false,           // staccato — a dot under the head, and played short
+    slurStart:false,      // a slur (legato phrase mark) begins on this note…
+    slurEnd:false,        // …and ends on this one; see slurPairs()
     expr:"",              // a performance direction, written under the staff
     tup:0,                // 0, or 3 for a member of a triplet
     link:null,            // null | "legato" (hammer or pull) | "slide", to the next note
@@ -1345,6 +1348,43 @@ const DIRECTIONS = [
 // Dynamics are letters, not words, and are engraved as such: bold, italic, in
 // a serif face, a touch larger. The rest stay plain italic.
 const DYNAMICS = new Set(["pp", "p", "mp", "mf", "f", "ff"]);
+// Slurs: the curve over a run of different notes, meaning play them smoothly.
+// Kept as a start flag and an end flag rather than a length, so inserting or
+// deleting notes inside one stretches it instead of breaking it. Each start
+// pairs with the next end; a flag left without its partner is ignored.
+function slurPairs(notes){
+  const out = [];
+  let from = -1;
+  notes.forEach((n, i) => {
+    if (n.slurStart && from < 0){ from = i; if (!n.slurEnd) return; }
+    if (n.slurEnd && from >= 0 && i > from){ out.push({ from, to:i }); from = -1; }
+  });
+  return out;
+}
+
+// One slur's piece on this line, from x1 to x2 at y, bowing `dir` (+1 down,
+// −1 up). An end that is on another line runs to the margin, open.
+function slurArc(x1, x2, y, dir){
+  const depth = Math.min(16, 9 + (x2 - x1) / 40) * dir;
+  const k = Math.min(18, (x2 - x1) / 4);
+  return `<path d="M${x1},${y} C${x1 + k},${y + depth} ${x2 - k},${y + depth} ${x2},${y} `
+       + `C${x2 - k},${y + depth + 1.3 * dir} ${x1 + k},${y + depth + 1.3 * dir} ${x1},${y} z" `
+       + `fill="#2a2e35" stroke="#2a2e35" stroke-width="0.4"/>`;
+}
+
+// The slurs of a section that touch this line, as {x1, x2, from, to, open…}.
+function slursOnLine(notes, sys, xOf, left, right){
+  const items = sys.measures.flatMap(m => m.items);
+  if (!items.length) return [];
+  const first = items[0].i, last = items[items.length - 1].i;
+  return slurPairs(notes)
+    .filter(p => p.to >= first && p.from <= last)
+    .map(p => ({ from: Math.max(p.from, first), to: Math.min(p.to, last), whole: p,
+                 x1: p.from >= first ? xOf(p.from) + 2 : left,
+                 x2: p.to   <= last  ? xOf(p.to) - 2   : right }))
+    .filter(p => p.x2 - p.x1 > 4);
+}
+
 function exprText(x, y, expr){
   const dyn = DYNAMICS.has(expr);
   return `<text x="${x}" y="${y}" font-size="${dyn ? 14 : 12}" font-style="italic" `
@@ -1847,6 +1887,12 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
     for (const it of mm.items)
       pos.set(it.i, mm.x + it.x + it.w / 2);
 
+  // ---- slurs: the stems all point up here, so under the heads, below a tie --
+  for (const sl of slursOnLine(notes, sys, i => pos.get(i), 2, sys.width - 4)){
+    const dotted = notes[sl.from].stac || notes[sl.to].stac;
+    s += slurArc(sl.x1, sl.x2, TIE_Y + 3 + (dotted ? 5 : 0), 1);
+  }
+
   // ---- triplet brackets, just above the beams ----------------------
   if (showTups){
     for (const run of tupletRuns(notes)){
@@ -2164,6 +2210,25 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
   for (const mm of sys.measures)
     for (const it of mm.items)
       pos.set(it.i, mapX(mm.x + it.x + it.w / 2));
+
+  // ---- slurs: on the side of the heads away from the stems. The stems are
+  // put to the vote the way a beam group's are — on or over the middle line is
+  // a vote for down, a tie goes down — over the whole slur, so both halves of
+  // one that crosses a line bow the same way -------------------------------
+  const headsOf = n => (!n || n.rest || n.dead) ? []
+    : gripMidis(n).map(mi => staffPos(writtenMidi(mi), fifths, tab, new Map(), false));
+  for (const sl of slursOnLine(notes, sys, i => pos.get(i), inset, W - 6)){
+    let vote = 0;
+    for (let i = sl.whole.from; i <= sl.whole.to; i++){
+      const hs = headsOf(notes[i]);
+      if (hs.length) vote += hs.reduce((a, h) => a + h.dia, 0) / hs.length >= 0 ? 1 : -1;
+    }
+    const ys = [];
+    for (let i = sl.from; i <= sl.to; i++) for (const h of headsOf(notes[i])) ys.push(h.y);
+    if (!ys.length) continue;
+    s += vote >= 0 ? slurArc(sl.x1, sl.x2, Math.min(...ys) - 8, -1)     // stems down: over
+                   : slurArc(sl.x1, sl.x2, Math.max(...ys) + 8, 1);     // stems up: under
+  }
 
   // ---- tuplet brackets --------------------------------------------
   if (showTups){
@@ -2726,6 +2791,11 @@ function renderSidebar(){
         <button class="btn ${n.stac?"on":""}" data-stac style="flex:1"
           title="A dot under the note, played short (,)"
         >${n.stac ? "short" : "as written"}</button>
+      </div>
+      <div class="row"><label>Slur</label>
+        <button class="btn ${inSlur()?"on":""}" data-slur style="flex:1"
+          title="A curve over the selected notes: play them smoothly, connected. With nothing selected, this note to the next. Again to remove. ( "
+        >${inSlur() ? "in a slur — remove" : selRange() ? "slur the selection" : "slur to next"}</button>
       </div>
       <div class="row"><label>To next</label>
         <div class="grid" style="flex:1">
@@ -5434,6 +5504,34 @@ function toggleStaccato(){
   render();
 }
 
+// Slur the selection — or, with nothing selected, this note to the next. A
+// selection that already has a slur in it loses that slur instead, partners
+// and all, so the same key puts one on and takes it off.
+function toggleSlur(){
+  if (isRefSection()) return;
+  const ns = curNotes();
+  const span = clipSpan();
+  if (!span) return;
+  let { from, to } = span;
+  // a slur the selection reaches into — or, for a lone note, the one it is in
+  const hit = slurPairs(ns).filter(p => p.from <= to && p.to >= from);
+  if (to === from) to = from + 1;
+  if (!hit.length && to >= ns.length) return;      // nothing after the last note to slur to
+  pushUndo();
+  if (hit.length){
+    for (const p of hit){ ns[p.from].slurStart = false; ns[p.to].slurEnd = false; }
+  } else {
+    // stray flags inside would pair up with these and cut the new slur short
+    for (let i = from; i <= to; i++){ ns[i].slurStart = false; ns[i].slurEnd = false; }
+    ns[from].slurStart = true;
+    ns[to].slurEnd = true;
+  }
+  render();
+}
+function inSlur(){
+  return slurPairs(curNotes()).some(p => p.from <= cursor.i && p.to >= cursor.i);
+}
+
 // none → hammer/pull → slide → none
 function cycleLink(){
   const n = curNote();
@@ -5927,7 +6025,7 @@ const NOTE_KEYS = new Set([
   "0","1","2","3","4","5","6","7","8","9",
   "w","h","q","e","s",".",
   "r","R","t","T","n","N","l","L","c","C",
-  "m","M","i","I","a","A","[","]","x","X","-","_","T","v","V","Enter","Backspace","Delete"
+  "m","M","i","I","a","A","[","]","(","x","X","-","_","T","v","V","Enter","Backspace","Delete"
 ]);
 
 function inField(el){
@@ -6083,6 +6181,7 @@ document.addEventListener("keydown", e => {
     case "S":           e.preventDefault(); splitSection(); break;
     case "J":           e.preventDefault(); joinSection(); break;
     case "E":           e.preventDefault(); setEntryMode(entryMode === "names" ? "frets" : "names"); break;
+    case "(":           e.preventDefault(); toggleSlur(); break;
     case "[":           e.preventDefault(); toggleRepeat("repStart"); break;
     case "]":           e.preventDefault(); toggleRepeat("repEnd"); break;
     case "Enter":       e.preventDefault(); e.shiftKey ? toggleBreak() : addMeasure(); break;
@@ -6342,6 +6441,7 @@ document.querySelector(".sidebar").addEventListener("click", e => {
   if (d.rest !== undefined) return toggleRest();
   if (d.dead !== undefined) return toggleDead();
   if (d.stac !== undefined) return toggleStaccato();
+  if (d.slur !== undefined) return toggleSlur();
   if (d.link !== undefined){
     const n = curNote();
     if (n && !n.rest){ pushUndo(); n.link = d.link || null; render(); }
