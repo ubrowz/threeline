@@ -6713,6 +6713,30 @@ function suggestedName(){
 
 function songText(){ return JSON.stringify(song, null, 2); }
 
+// Unsaved work, so Open and New can ask before throwing it away. `cleanText` is
+// the song as it last stood somewhere safe — written to a file, read from one,
+// or a fresh blank or demo. It is kept beside the autosave, so the answer is
+// still right after a reload. With no baseline at all (a MIDI or iReal import,
+// say) anything but an empty song counts as unsaved.
+const LS_CLEAN = "bass-notation-clean", LS_CLEAN_STASH = "bass-notation-clean-stash";
+let cleanText = null;
+function markClean(text){
+  cleanText = text;
+  try {
+    if (text === null) localStorage.removeItem(LS_CLEAN);
+    else localStorage.setItem(LS_CLEAN, text);
+  } catch(e){ /* storage off: the baseline lasts this session only */ }
+}
+function hasUnsavedWork(){
+  const t = songText();
+  return cleanText !== null ? t !== cleanText : t !== JSON.stringify(blankSong(), null, 2);
+}
+// True when it is fine to go ahead: nothing unsaved, or you said so.
+function okToReplace(what){
+  if (!hasUnsavedWork()) return true;
+  return confirm(`You have unsaved changes in “${song.title || "Untitled"}”.\n\n${what} without saving?`);
+}
+
 const clockOf = d => String(d.getHours()).padStart(2, "0") + ":"
                    + String(d.getMinutes()).padStart(2, "0");
 
@@ -6774,6 +6798,7 @@ async function writeSong(handle){
   fileName = handle.name;
   savedText = text;
   savedAt = new Date();
+  markClean(text);
   rememberHandle(handle);
   updateFileState(true);
   return true;
@@ -6789,6 +6814,7 @@ function downloadSong(){        // the fallback: always a new file
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   savedText = text;
   savedAt = new Date();
+  markClean(text);
   fileName = a.download;
   updateFileState(true);
 }
@@ -6822,6 +6848,7 @@ async function saveFile(askAgain){
 }
 
 async function openFile(){
+  if (!okToReplace("Open another file")) return;
   if (!CAN_PICK){ $("#fileInput").click(); return; }
   try {
     const [handle] = await window.showOpenFilePicker({
@@ -6839,6 +6866,7 @@ async function openFile(){
     fileHandle = handle;                 // so Save writes back to this file
     fileName = handle.name;
     savedText = songText();
+    markClean(savedText);
     rememberHandle(handle);
     updateFileState();
   } catch (err){
@@ -6892,7 +6920,7 @@ $("#fileInput").addEventListener("change", e => {
   } else {
     r.onload = () => {
       if (isIrealText(r.result)){ importIreal(r.result, f.name); return; }
-      try { loadSong(JSON.parse(r.result)); }
+      try { loadSong(JSON.parse(r.result)); markClean(songText()); }
       catch (err){ alert("Could not open that file:\n" + err.message); }
     };
     r.readAsText(f);
@@ -7026,6 +7054,7 @@ function importMidi(bytes, name){
   loadSong(read.song);               // over your work has to be undoable
   undoStack = stack;
   fileHandle = null; fileName = ""; savedText = null; savedAt = null;
+  markClean(null);
   rememberHandle(null);
   updateFileState();
 
@@ -7058,6 +7087,7 @@ function importIreal(text, name){
   loadSong(read.song);
   undoStack = stack;
   fileHandle = null; fileName = ""; savedText = null; savedAt = null;
+  markClean(null);
   rememberHandle(null);
   updateFileState();
 
@@ -7092,9 +7122,12 @@ function showCarriedOver(){
 function carryOver(){
   const kept = localStorage.getItem(LS_STASH);
   if (!kept) return;
+  if (!okToReplace("Bring back the earlier one")) return;
   try { loadSong(JSON.parse(kept)); }
   catch(e){ localStorage.removeItem(LS_STASH); showCarriedOver(); return; }
   localStorage.removeItem(LS_STASH);
+  markClean(localStorage.getItem(LS_CLEAN_STASH));
+  localStorage.removeItem(LS_CLEAN_STASH);
   // the file it was saved to belongs with it
   recallHandle().then(h => {
     if (!h) return;
@@ -7106,6 +7139,7 @@ function carryOver(){
 
 function dropCarriedOver(){
   localStorage.removeItem(LS_STASH);
+  localStorage.removeItem(LS_CLEAN_STASH);
   showCarriedOver();
 }
 
@@ -7114,7 +7148,7 @@ $("#btnCarryOn").addEventListener("click", carryOver);
 $("#btnCarryDrop").addEventListener("click", dropCarriedOver);
 
 $("#btnNew").addEventListener("click", () => {
-  if (!confirm("Start a new, empty transcription? Save first if you want to keep this one.")) return;
+  if (!okToReplace("Start a new transcription")) return;
   pushUndo();
   fileHandle = null; fileName = ""; savedText = null;
   rememberHandle(null);
@@ -7123,6 +7157,7 @@ $("#btnNew").addEventListener("click", () => {
   cursor = { sec:0, i:0 };
   syncFields();
   render();
+  markClean(songText());
 });
 
 /* ============================================================
@@ -7132,8 +7167,10 @@ $("#btnNew").addEventListener("click", () => {
 const HOSTED = location.protocol === "http:" || location.protocol === "https:";
 let plan = { open:"blank", stash:null, takeFile:false };
 
+let lastClean = null;
 try{
   const saved = localStorage.getItem(LS_KEY);
+  lastClean = localStorage.getItem(LS_CLEAN);
   plan = bootPlan(saved, HOSTED);
   applyBootPlan(plan, saved);        // loadSong, so a restored autosave gets
 }catch(e){ /* keep the starting song */ }   // the same migration as a file
@@ -7157,6 +7194,15 @@ showCarriedOver();
 
 syncFields();
 render();
+// The unsaved-work baseline: a restored autosave keeps the one it had; a fresh
+// blank or demo is clean as it stands, and set-aside work keeps its own.
+try {
+  if (plan.open === "saved") cleanText = lastClean;
+  else {
+    if (plan.stash && lastClean !== null) localStorage.setItem(LS_CLEAN_STASH, lastClean);
+    markClean(songText());
+  }
+} catch(e){}
 syncNarrow();
 fitSheet();
 updateTransport();
