@@ -596,11 +596,12 @@
           </select>
         </div>
         <div class="row"><label>Sound</label>
-          <select class="fld" id="fSound" title="Which bass it sounds like. Where a pickup sits along the string is what changes the tone. Off silences the bass — with Click on, that is a plain metronome.">
+          <select class="fld" id="fSound" title="Which bass it sounds like. Where a pickup sits along the string is what changes the tone. Flute plays the part two octaves up, as the treble-clef view writes it. Off silences the bass — with Click on, that is a plain metronome.">
             <option value="off">off</option>
             <option value="plain">plain</option>
             <option value="p">P-style</option>
             <option value="j">J-style</option>
+            <option value="flute">flute — 2 octaves up</option>
           </select>
         </div>
         <div class="row"><label>Covers</label>
@@ -3096,6 +3097,18 @@ function buildPlan(fromK, toK, rate){
   const tl = timeline();
   const events = [], steps = [];
   let t = 0;
+  // notes a slur carries on into (all but its first), per section — a wind
+  // voice joins these without a fresh start
+  const slurredIn = new Map();
+  const isSlurredIn = (si, i) => {
+    if (!slurredIn.has(si)){
+      const set = new Set();
+      const sec = song.sections[si];
+      if (sec) for (const p of slurPairs(sec.notes)) for (let j = p.from + 1; j <= p.to; j++) set.add(j);
+      slurredIn.set(si, set);
+    }
+    return slurredIn.get(si).has(i);
+  };
 
   for (let k = fromK; k <= toK && k < tl.length; k++){
     const { si, i, n } = tl[k];
@@ -3124,7 +3137,7 @@ function buildPlan(fromK, toK, rate){
       for (const mi of gripMidis(n))
         events.push({
           t, dur: heard, midi: mi, si, i,
-          dead: !!n.dead, soft,
+          dead: !!n.dead, soft, slurred: isSlurredIn(si, i),
           from: fromMi === null ? null : mi + offset
         });
     }
@@ -4166,8 +4179,84 @@ function drumVoice(ctx, when, note, vel, out){
 
 function sound(ctx, when, ev, out){
   if (bassSound === "off") return;          // the click carries the beat on its own
+  if (bassSound === "flute"){               // a ghost note has no flute equivalent
+    if (!ev.dead) fluteVoice(ctx, when, ev.dur, ev.midi + 24, out, ev);
+    return;
+  }
   if (ev.dead) deadVoice(ctx, when, out);
   else voice(ctx, when, ev.dur, ev.midi, out, ev);
+}
+
+// A flute, for (mis)using the editor for a flute part. It sounds two octaves
+// above the bass, the pitch the treble-clef view writes. A near-sine with a
+// little second and third harmonic, a breath of noise at the start and under
+// the tone, and vibrato that arrives once the note has settled. It holds its
+// level for the whole note — wind does not die away like a string. A note a
+// slur carries on into (or a hammer or slide reaches) is not tongued: no
+// breath burst, and a quick swell rather than a fresh attack.
+let _fluteWave = null;
+function fluteVoice(ctx, when, dur, midi, out, art){
+  const f = 440 * Math.pow(2, (midi - 69) / 12);
+  const joined = !!(art && (art.slurred || art.soft));
+  if (!_fluteWave || _fluteWave.ctx !== ctx){
+    const re = new Float32Array([0, 0, 0, 0, 0]);
+    const im = new Float32Array([0, 1, 0.22, 0.07, 0.025]);
+    _fluteWave = { ctx, wave: ctx.createPeriodicWave(re, im) };
+  }
+  const osc = ctx.createOscillator();
+  osc.setPeriodicWave(_fluteWave.wave);
+  osc.frequency.setValueAtTime(f, when);
+
+  // vibrato: about 5 Hz, fading in after a quarter second on longer notes
+  const vib = ctx.createOscillator(), vibAmt = ctx.createGain();
+  vib.frequency.value = 5.1;
+  vibAmt.gain.setValueAtTime(0, when);
+  if (dur > 0.35){
+    vibAmt.gain.setValueAtTime(0, when + 0.22);
+    vibAmt.gain.linearRampToValueAtTime(f * 0.005, when + 0.6);
+  }
+  vib.connect(vibAmt); vibAmt.connect(osc.frequency);
+
+  // the end: a short taper, leaving a hair of air before the next note
+  const end = when + Math.max(0.05, dur - (joined ? 0.004 : 0.03));
+  const peak = 0.13;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.exponentialRampToValueAtTime(peak, when + (joined ? 0.015 : 0.045));
+  g.gain.setTargetAtTime(peak * 0.85, when + 0.08, 0.15);      // settles a little
+  g.gain.setTargetAtTime(0.0001, end, 0.025);
+
+  // breath: band-passed noise around the note, a burst on a tongued start
+  const len = Math.ceil(ctx.sampleRate * 0.5);
+  if (!ctx._noise){
+    const b = ctx.createBuffer(1, len, ctx.sampleRate), d = b.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    ctx._noise = b;
+  }
+  const noise = ctx.createBufferSource();
+  noise.buffer = ctx._noise; noise.loop = true;
+  const bp = ctx.createBiquadFilter();
+  bp.type = "bandpass"; bp.frequency.value = Math.min(8000, f * 2.5); bp.Q.value = 1.2;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.0001, when);
+  if (!joined){
+    ng.gain.exponentialRampToValueAtTime(0.05, when + 0.012);
+    ng.gain.exponentialRampToValueAtTime(0.008, when + 0.09);
+  } else {
+    ng.gain.exponentialRampToValueAtTime(0.008, when + 0.03);
+  }
+  ng.gain.setTargetAtTime(0.0001, end, 0.025);
+
+  // soften the top so it is round rather than electronic
+  const lp = ctx.createBiquadFilter();
+  lp.type = "lowpass"; lp.frequency.value = Math.min(9000, f * 6); lp.Q.value = 0.5;
+
+  osc.connect(lp); lp.connect(g);
+  noise.connect(bp); bp.connect(ng); ng.connect(g);
+  g.connect(out);
+  const stop = end + 0.2;
+  osc.start(when); vib.start(when); noise.start(when);
+  osc.stop(stop); vib.stop(stop); noise.stop(stop);
 }
 
 // A pickup cannot hear a harmonic that has a node where the pickup sits, which
@@ -4183,6 +4272,7 @@ function sound(ctx, when, ev, out){
 const PICKUPS = {
   off: null,
   plain: null,
+  flute: null,              // not a bass at all — see fluteVoice()
   // one fat pickup up the neck: low mids lifted, the top shut down early, more
   // sub under it. Thumpy — a flatwound P.
   p: { at: [0.21],
@@ -4286,13 +4376,22 @@ function voice(ctx, when, dur, midi, out, art){
   bodyMid.type = "peaking"; bodyMid.frequency.value = 450;
   bodyMid.Q.value = 1.0; bodyMid.gain.value = -2.5;
 
-  const len = Math.max(0.09, dur * 0.92);
+  // A plucked string: the attack, a quick settle out of the pluck, then a long
+  // ring that fades over a second or so — longer on the low strings — until
+  // the note's time is up and the hand damps it. It used to fade to nothing
+  // within the note's own length, which made every line sound staccato.
+  const end = when + Math.max(0.06, dur - 0.012);
+  const len = end - when + 0.12;                       // damping takes ~0.1 s
   // hammered, pulled or slid notes are not plucked, so they speak more quietly
   const peak = soft ? 0.10 : 0.17;
+  const ring = Math.max(0.55, Math.min(1.6, 1.6 - (midi - 28) * 0.03));
   const g = ctx.createGain();
+  const top = when + (soft ? 0.018 : 0.006) + Math.random() * 0.003;
   g.gain.setValueAtTime(0.0001, when);
-  g.gain.exponentialRampToValueAtTime(peak, when + (soft ? 0.018 : 0.006) + Math.random() * 0.003);
-  g.gain.exponentialRampToValueAtTime(0.0001, when + len);
+  g.gain.exponentialRampToValueAtTime(peak, top);
+  g.gain.setTargetAtTime(peak * 0.5, top, 0.07);       // out of the pluck
+  g.gain.setTargetAtTime(0.0001, top + 0.18, ring);    // the ring
+  g.gain.setTargetAtTime(0.0001, end, 0.022);          // damped
 
   const subGain = ctx.createGain();
   subGain.gain.value = (pk && pk.sub != null) ? pk.sub : 0.15;
