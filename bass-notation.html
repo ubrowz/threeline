@@ -634,6 +634,7 @@
           <div><kbd>↑</kbd><kbd>↓</kbd></div><div>string (E A D G)</div>
           <div><kbd>←</kbd><kbd>→</kbd></div><div>move between notes</div>
           <div><kbd>space</kbd></div><div>next note</div>
+          <div><kbd>space</kbd> <kbd>⇧space</kbd></div><div>in Practice: half a page down / up</div>
           <div><kbd>⇧←</kbd> <kbd>⇧→</kbd></div><div>select a range of notes</div>
           <div><kbd>⌘A</kbd></div><div>select the whole section</div>
           <div><kbd>⌘C</kbd> <kbd>⌘X</kbd></div><div>copy / cut the selection</div>
@@ -4514,6 +4515,12 @@ const PLAY_LINE = 0.24;      // where a line lands after a turn, from the top
 
 let turnedTo = null;
 
+// Half the visible sheet up or down — Practice's page turn, on Space.
+function scrollHalfPage(dir){
+  const area = $("#scrollarea");
+  if (area) area.scrollBy({ top: dir * area.clientHeight / 2, behavior: "smooth" });
+}
+
 // Turn the page a line early rather than dragging the current line to the
 // bottom edge: a player needs to see the next bars before playing them.
 function scrollAhead(el){
@@ -6128,7 +6135,9 @@ document.addEventListener("keydown", e => {
     if (k === "ArrowLeft" || k === "ArrowRight"){
       e.preventDefault(); stepCursor(k === "ArrowRight" ? 1 : -1, e.shiftKey); return;
     }
-    if (k === " "){ e.preventDefault(); moveCursor(+1); return; }
+    // Space turns half a page, like a reader's page turn; ⇧Space goes back.
+    // The arrows still step through the notes.
+    if (k === " "){ e.preventDefault(); scrollHalfPage(e.shiftKey ? -1 : 1); return; }
     return;                                     // everything else writes
   }
 
