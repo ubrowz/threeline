@@ -436,7 +436,7 @@
       </div>
 
       <div class="carryover" id="carryover" hidden>
-        <div><b>Opened fresh.</b> This page starts each visit clean, so a Save out of habit can't overwrite one of your files. Your work from last time is set aside here.</div>
+        <div id="carryText"><b>Welcome back.</b> Each visit starts empty, so nothing is overwritten by accident. Your last piece is set aside — <b>Reopen it</b> to carry on.</div>
         <div class="grid" style="margin-top:8px">
           <button class="btn" id="btnCarryOn" title="Load last time's transcription again, along with the file it was saved to">Reopen it</button>
           <button class="btn" id="btnCarryDrop" title="Forget it and keep the empty transcription">Discard</button>
@@ -7213,9 +7213,23 @@ function say(text){
   el.hidden = false;
 }
 
+// Names the piece that was set aside, and the file it goes with, so it is plain
+// that Reopen brings back both — and Save writes to that file again.
 function showCarriedOver(){
   const el = $("#carryover");
-  if (el) el.hidden = !localStorage.getItem(LS_STASH);
+  if (!el) return;
+  const kept = localStorage.getItem(LS_STASH);
+  el.hidden = !kept;
+  if (!kept) return;
+  let title = "";
+  try { title = JSON.parse(kept).title || ""; } catch(e){}
+  const say = file => {
+    $("#carryText").innerHTML = `<b>Welcome back.</b> Each visit starts empty, so nothing is overwritten by accident. `
+      + `Your last piece${title ? `, <b>“${esc(title)}”</b>` : ""}${file ? ` (${esc(file)})` : ""}, is set aside — `
+      + `<b>Reopen it</b> to carry on${file ? ", and Save will write to that file again" : ""}.`;
+  };
+  say("");
+  recallHandle().then(h => { if (h && localStorage.getItem(LS_STASH)) say(h.name); });
 }
 
 function carryOver(){
