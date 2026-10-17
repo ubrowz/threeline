@@ -1422,6 +1422,16 @@ function markBands(notes, sys, xOf, wScale, y, h){
   return s;
 }
 
+// Whether this line holds the end of its section — where the append caret goes
+// when the cursor sits past the last note. Every line has a last bar; only one
+// has the section's last note.
+function endsSection(notes, sys){
+  if (!notes.length) return true;
+  const lm = sys.measures[sys.measures.length - 1];
+  const last = lm && lm.items[lm.items.length - 1];
+  return !!last && last.i === notes.length - 1;
+}
+
 // Slurs: the curve over a run of different notes, meaning play them smoothly.
 // Kept as a start flag and an end flag rather than a length, so inserting or
 // deleting notes inside one stretches it instead of breaking it. Each start
@@ -2227,7 +2237,8 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
     }
 
     // append-cursor caret at the very end of the section
-    if (secIdx === cursor.sec && cursor.i === notes.length && m === sys.measures[sys.measures.length-1]){
+    if (secIdx === cursor.sec && cursor.i === notes.length && m === sys.measures[sys.measures.length-1]
+        && endsSection(notes, sys)){
       const last = m.items[m.items.length-1];
       const cx = last ? m.x + last.x + last.w + 8 : m.x + MEASURE_PAD_L + 6;
       s += `<line x1="${cx}" y1="24" x2="${cx}" y2="${STAFF_BOT+4}" stroke="#2f6fd0" stroke-width="1.6"/>`;
@@ -2595,7 +2606,8 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
       s += `<rect class="hit" x="${mapX(m.x + it.x)}" y="${selY}" width="${it.w * xScale}" height="${selH}" data-sec="${secIdx}" data-i="${it.i}"/>`;
     }
 
-    if (secIdx === cursor.sec && cursor.i === notes.length && m === sys.measures[sys.measures.length-1]){
+    if (secIdx === cursor.sec && cursor.i === notes.length && m === sys.measures[sys.measures.length-1]
+        && endsSection(notes, sys)){
       const last = m.items[m.items.length-1];
       const cx = last ? mapX(m.x + last.x + last.w) + 8 : mapX(m.x + MEASURE_PAD_L) + 6;
       s += `<line x1="${cx}" y1="${ST_TOP - 6}" x2="${cx}" y2="${ST_BOT + 6}" stroke="#2f6fd0" stroke-width="1.6"/>`;
@@ -2714,7 +2726,7 @@ function drawChordSystem(secIdx, sec, sys, barNo, opts){
 
   // the caret, when the cursor sits past the last note of the section
   const lastM = sys.measures[sys.measures.length - 1];
-  if (secIdx === cursor.sec && cursor.i === notes.length && lastM){
+  if (secIdx === cursor.sec && cursor.i === notes.length && lastM && endsSection(notes, sys)){
     const cx = lastM.x + lastM.w - 4;
     s += `<line x1="${cx}" y1="${yTop}" x2="${cx}" y2="${yBot}" stroke="#2f6fd0" stroke-width="1.6"/>`;
   }
