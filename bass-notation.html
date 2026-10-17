@@ -549,6 +549,15 @@
         </div>
         <div id="inspector"></div>
         <button class="btn" data-addsticky style="width:100%;margin-top:8px" title="Pin a yellow note at this note. Drag its top strip to move it anywhere; × removes it. Not printed. (y)">+ Sticky note</button>
+        <div class="row" style="margin-top:6px"><label>Marker</label>
+          <div class="grid" style="flex:1">
+            <button class="btn" data-mark="yellow" style="flex:1;background:#ffe14a99" title="Highlight the selection in yellow — again to take it off (k)">&nbsp;</button>
+            <button class="btn" data-mark="green" style="flex:1;background:#86dc7f99" title="Highlight the selection in green — again to take it off">&nbsp;</button>
+            <button class="btn" data-mark="pink" style="flex:1;background:#ff9cc999" title="Highlight the selection in pink — again to take it off">&nbsp;</button>
+            <button class="btn" data-mark="blue" style="flex:1;background:#86c3ff99" title="Highlight the selection in blue — again to take it off">&nbsp;</button>
+            <button class="btn" data-mark="" style="flex:1" title="Take any colour off the selection">×</button>
+          </div>
+        </div>
       </div>
 
       <div class="card card--edit">
@@ -646,7 +655,16 @@
             <option value="lyrics">Chords + lyrics</option>
           </select>
         </div>
-        <div class="row" style="margin-bottom:8px"><button class="btn" data-addsticky style="flex:1" title="Pin a yellow note at the cursor. Drag its top strip to move it anywhere; × removes it. Not printed. (y)">+ Sticky note</button></div>
+        <div class="row"><button class="btn" data-addsticky style="flex:1" title="Pin a yellow note at the cursor. Drag its top strip to move it anywhere; × removes it. Not printed. (y)">+ Sticky note</button></div>
+        <div class="row" style="margin-bottom:8px"><label>Marker</label>
+          <div class="grid" style="flex:1">
+            <button class="btn" data-mark="yellow" style="flex:1;background:#ffe14a99" title="Highlight the selection in yellow — again to take it off (k)">&nbsp;</button>
+            <button class="btn" data-mark="green" style="flex:1;background:#86dc7f99" title="Highlight the selection in green — again to take it off">&nbsp;</button>
+            <button class="btn" data-mark="pink" style="flex:1;background:#ff9cc999" title="Highlight the selection in pink — again to take it off">&nbsp;</button>
+            <button class="btn" data-mark="blue" style="flex:1;background:#86c3ff99" title="Highlight the selection in blue — again to take it off">&nbsp;</button>
+            <button class="btn" data-mark="" style="flex:1" title="Take any colour off the selection">×</button>
+          </div>
+        </div>
         <div class="row"><label>Key</label>
           <select class="fld" id="fKey" title="Key of the piece. Sets the key signature and how notes are spelled in the standard view. Saved with the song; the tab view is unaffected."></select>
         </div>
@@ -680,6 +698,7 @@
           <div><kbd>,</kbd></div><div>staccato — the other dot key</div>
           <div><kbd>(</kbd></div><div>slur the selection (play legato), or remove it</div>
           <div><kbd>y</kbd></div><div>a yellow sticky note at the cursor — drag its top to move, × to remove</div>
+          <div><kbd>k</kbd></div><div>highlight the selection with the marker, or take it off</div>
           <div><kbd>⇧T</kbd></div><div>split into a triplet, or merge one back</div>
           <div><kbd>t</kbd></div><div>tie to next note</div>
           <div><kbd>n</kbd></div><div>flip sharp ↔ flat spelling</div>
@@ -854,6 +873,7 @@ function newNote(o){
     slurStart:false,      // a slur (legato phrase mark) begins on this note…
     slurEnd:false,        // …and ends on this one; see slurPairs()
     sticky:null,          // a yellow note pinned here: { text, dx, dy } — see placeStickies()
+    mark:null,            // highlighter colour behind this note: a MARKERS key, or null
     expr:"",              // a performance direction, written under the staff
     tup:0,                // 0, or 3 for a member of a triplet
     link:null,            // null | "legato" (hammer or pull) | "slide", to the next note
@@ -1377,6 +1397,31 @@ const DIRECTIONS = [
 // Dynamics are letters, not words, and are engraved as such: bold, italic, in
 // a serif face, a touch larger. The rest stay plain italic.
 const DYNAMICS = new Set(["pp", "p", "mp", "mf", "f", "ff"]);
+// The highlighter: a band of colour over marked notes, like a marker pen on
+// paper. Neighbouring notes in the same colour join into one band — across a
+// barline too — so a marked passage reads as one stroke. It goes on last and
+// multiplies, as ink does: the paper takes the colour, the black stays black,
+// and the white behind a fret number is coloured too rather than left as a
+// hole. Clicks pass through to the notes. Printed, as a marker on a page would be.
+const MARKERS = { yellow:"#ffe14a", green:"#86dc7f", pink:"#ff9cc9", blue:"#86c3ff" };
+function markBands(notes, sys, xOf, wScale, y, h){
+  let s = "", run = null;
+  const flush = () => {
+    if (run) s += `<rect x="${run.x1}" y="${y}" width="${run.x2 - run.x1}" height="${h}" rx="3" `
+                + `fill="${MARKERS[run.c]}" opacity="0.6" style="mix-blend-mode:multiply" pointer-events="none"/>`;
+    run = null;
+  };
+  for (const m of sys.measures) for (const it of m.items){
+    const c = notes[it.i] && notes[it.i].mark;
+    const x1 = xOf(m.x + it.x), x2 = x1 + it.w * wScale;
+    if (!c || !MARKERS[c]){ flush(); continue; }
+    if (run && run.c === c && run.last === it.i - 1){ run.x2 = x2; run.last = it.i; }
+    else { flush(); run = { c, x1, x2, last: it.i }; }
+  }
+  flush();
+  return s;
+}
+
 // Slurs: the curve over a run of different notes, meaning play them smoothly.
 // Kept as a start flag and an end flag rather than a length, so inserting or
 // deleting notes inside one stretches it instead of breaking it. Each start
@@ -1918,7 +1963,8 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
   const beamed = new Set();
   let s = "";
 
-  // ---- selection highlight (behind everything) ---------------------
+  // ---- selection highlight (behind everything); the marker goes on last --
+  let marks = "";
   {
     for (const m of sys.measures){
       for (const it of m.items){
@@ -1926,6 +1972,7 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
           s += `<rect class="sel" x="${m.x + it.x}" y="${selY}" width="${it.w}" height="${selH}" rx="4" fill="#fff2c9"/>`;
       }
     }
+    marks = markBands(notes, sys, x => x, 1, selY, selH);
   }
 
   // ---- staff lines -------------------------------------------------
@@ -2188,7 +2235,7 @@ function drawSystem(secIdx, sec, sys, showLyrics, showChords, barNo, showTups, s
   }
 
   return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
-       + `<g transform="translate(0,${top})">${s}</g></svg>`;
+       + `<g transform="translate(0,${top})">${s}${marks}</g></svg>`;
 }
 
 // The "Standard" Practice view. Same section/system scaffolding as drawSystem,
@@ -2248,6 +2295,7 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
     for (const it of m.items)
       if (inSelection(secIdx, it.i))
         s += `<rect class="sel" x="${mapX(m.x + it.x)}" y="${selY}" width="${it.w * xScale}" height="${selH}" rx="4" fill="#fff2c9"/>`;
+  const marks = markBands(notes, sys, mapX, xScale, selY, selH);
 
   // ---- staff, clef, key signature ------------------------------------
   for (let k = 0; k < 5; k++){
@@ -2555,7 +2603,7 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
   }
 
   return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
-       + `<g transform="translate(0,${top})">${s}</g></svg>`;
+       + `<g transform="translate(0,${top})">${s}${marks}</g></svg>`;
 }
 
 // The "Chords" Practice view: bars and their chord symbols, nothing else — a
@@ -2588,6 +2636,7 @@ function drawChordSystem(secIdx, sec, sys, barNo, opts){
     for (const it of m.items)
       if (inSelection(secIdx, it.i))
         s += `<rect class="sel" x="${m.x + it.x}" y="${selY}" width="${it.w}" height="${selH}" rx="5" fill="#fff2c9"/>`;
+  const marks = markBands(notes, sys, x => x, 1, selY, selH);
 
   // 1st / 2nd ending brackets
   if (showEnds){
@@ -2671,7 +2720,7 @@ function drawChordSystem(secIdx, sec, sys, barNo, opts){
   }
 
   return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
-       + `<g transform="translate(0,${top})">${s}</g></svg>`;
+       + `<g transform="translate(0,${top})">${s}${marks}</g></svg>`;
 }
 
 /* ============================================================
@@ -6045,6 +6094,24 @@ function addSection(ref){
    Events — keyboard
    ============================================================ */
 
+/* ---------- the highlighter ----------
+   Colour the selection (or the cursor note) like a marker pen; the same colour
+   again takes it off, and × clears any colour. An annotation, not music, so it
+   works in Practice too. */
+let markerColor = "yellow";
+function markSelection(color){
+  if (isRefSection()) return;
+  const ns = curNotes(), span = clipSpan();
+  if (!span) return;
+  let all = true;
+  for (let i = span.from; i <= span.to; i++) if (ns[i].mark !== color) all = false;
+  pushUndo();
+  for (let i = span.from; i <= span.to; i++) ns[i].mark = (color && !all) ? color : null;
+  if (color) markerColor = color;
+  selAnchor = null;              // so the colour shows rather than the selection
+  render();
+}
+
 /* ---------- sticky notes ----------
    A yellow note you can put anywhere on the sheet. Each is pinned to a note —
    kept on the note itself, with an offset — so it moves when a line break or
@@ -6312,6 +6379,7 @@ document.addEventListener("keydown", e => {
     if (k === "-" || k === "_"){ e.preventDefault(); setReadZoom(readZoom - 0.1); return; }
     if (k === "c" || k === "C"){ e.preventDefault(); toggleReadCols(); return; }
     if (k === "y" || k === "Y"){ e.preventDefault(); addSticky(); return; }
+    if (k === "k" || k === "K"){ e.preventDefault(); markSelection(markerColor); return; }
     if (k === "ArrowLeft" || k === "ArrowRight"){
       e.preventDefault(); stepCursor(k === "ArrowRight" ? 1 : -1, e.shiftKey); return;
     }
@@ -6342,6 +6410,7 @@ document.addEventListener("keydown", e => {
     }
     if (k === "P"){ e.preventDefault(); togglePractice(); return; }
     if (k === "y" || k === "Y"){ e.preventDefault(); addSticky(); return; }
+    if (k === "k" || k === "K"){ e.preventDefault(); markSelection(markerColor); return; }
     if (k === "f" || k === "F"){ e.preventDefault(); toggleReading(); return; }
     if (k === "ArrowLeft" || k === "ArrowRight"){
       e.preventDefault(); stepCursor(k === "ArrowRight" ? 1 : -1, e.shiftKey); return;
@@ -6437,6 +6506,7 @@ document.addEventListener("keydown", e => {
     case "S":           e.preventDefault(); splitSection(); break;
     case "J":           e.preventDefault(); joinSection(); break;
     case "y": case "Y": e.preventDefault(); addSticky(); break;
+    case "k": case "K": e.preventDefault(); markSelection(markerColor); break;
     case "E":           e.preventDefault(); setEntryMode(entryMode === "names" ? "frets" : "names"); break;
     case "(":           e.preventDefault(); toggleSlur(); break;
     case "[":           e.preventDefault(); toggleRepeat("repStart"); break;
@@ -6660,6 +6730,8 @@ $("#editpad").addEventListener("click", e => {
 // + Sticky note, in the Note card (Edit) and the Score card (Practice)
 document.querySelector(".sidebar").addEventListener("click", e => {
   if (e.target.closest("[data-addsticky]")) addSticky();
+  const mk = e.target.closest("[data-mark]");
+  if (mk) markSelection(mk.dataset.mark || null);
 });
 document.querySelector(".sidebar").addEventListener("click", e => {
   // Clicking a section in the list selects it. Without this the only way to
