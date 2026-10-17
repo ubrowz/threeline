@@ -86,7 +86,30 @@
   }
   .sectionhead:hover{border-color:var(--line)}
   .sectionhead:focus{outline:none;border-color:var(--accent);background:#fff}
-  .system{display:block;break-inside:avoid;page-break-inside:avoid}
+  .system{display:block;break-inside:avoid;page-break-inside:avoid;position:relative}
+
+  /* sticky notes: yellow paper over the music, pinned to a note */
+  .sticky{
+    position:absolute; z-index:20; width:150px;
+    background:#fff3a0; border:1px solid #e6d66a; border-radius:2px;
+    box-shadow:0 3px 9px rgba(0,0,0,.18); transform:rotate(-1deg);
+    font:13px/1.35 system-ui,-apple-system,sans-serif; color:#3b3410;
+  }
+  .sticky .grip{
+    height:16px; cursor:grab; background:#f7e67b; border-bottom:1px solid #eadb73;
+    display:flex; justify-content:flex-end; touch-action:none;
+  }
+  .sticky .grip:active{ cursor:grabbing }
+  .sticky .x{
+    border:0; background:none; color:#8a7a22; font:600 13px/16px system-ui,sans-serif;
+    padding:0 5px; cursor:pointer;
+  }
+  .sticky .x:hover{ color:#3b3410 }
+  .sticky textarea{
+    display:block; width:100%; min-height:44px; border:0; resize:vertical;
+    background:transparent; color:inherit; font:inherit; padding:5px 7px; outline:none;
+  }
+  @media print{ .sticky{ display:none !important } }
   .section.ref{break-inside:avoid;page-break-inside:avoid}
   .reftag{
     display:block;margin:-3px 0 0 -5px;font-size:10px;font-weight:600;
@@ -525,6 +548,7 @@
           </div>
         </div>
         <div id="inspector"></div>
+        <button class="btn" data-addsticky style="width:100%;margin-top:8px" title="Pin a yellow note at this note. Drag its top strip to move it anywhere; × removes it. Not printed. (y)">+ Sticky note</button>
       </div>
 
       <div class="card card--edit">
@@ -622,6 +646,7 @@
             <option value="lyrics">Chords + lyrics</option>
           </select>
         </div>
+        <div class="row" style="margin-bottom:8px"><button class="btn" data-addsticky style="flex:1" title="Pin a yellow note at the cursor. Drag its top strip to move it anywhere; × removes it. Not printed. (y)">+ Sticky note</button></div>
         <div class="row"><label>Key</label>
           <select class="fld" id="fKey" title="Key of the piece. Sets the key signature and how notes are spelled in the standard view. Saved with the song; the tab view is unaffected."></select>
         </div>
@@ -654,6 +679,7 @@
           <div><kbd>-</kbd></div><div>hammer / pull → slide → plain</div>
           <div><kbd>,</kbd></div><div>staccato — the other dot key</div>
           <div><kbd>(</kbd></div><div>slur the selection (play legato), or remove it</div>
+          <div><kbd>y</kbd></div><div>a yellow sticky note at the cursor — drag its top to move, × to remove</div>
           <div><kbd>⇧T</kbd></div><div>split into a triplet, or merge one back</div>
           <div><kbd>t</kbd></div><div>tie to next note</div>
           <div><kbd>n</kbd></div><div>flip sharp ↔ flat spelling</div>
@@ -827,6 +853,7 @@ function newNote(o){
     stac:false,           // staccato — a dot under the head, and played short
     slurStart:false,      // a slur (legato phrase mark) begins on this note…
     slurEnd:false,        // …and ends on this one; see slurPairs()
+    sticky:null,          // a yellow note pinned here: { text, dx, dy } — see placeStickies()
     expr:"",              // a performance direction, written under the staff
     tup:0,                // 0, or 3 for a member of a triplet
     link:null,            // null | "legato" (hammer or pull) | "slide", to the next note
@@ -2727,6 +2754,7 @@ function render(){
   });
 
   page.innerHTML = html;
+  placeStickies();
   renderSidebar();
   renderStatus();
   updateTransport();     // the loop readout follows the cursor and the selection
@@ -6017,6 +6045,88 @@ function addSection(ref){
    Events — keyboard
    ============================================================ */
 
+/* ---------- sticky notes ----------
+   A yellow note you can put anywhere on the sheet. Each is pinned to a note —
+   kept on the note itself, with an offset — so it moves when a line break or
+   the view moves its note, and is saved with the song. Not music, so Practice
+   can add, move and remove them too. Left off the printout. */
+function addSticky(){
+  const ns = curNotes();
+  if (isRefSection() || !ns.length) return;
+  const n = ns[Math.min(cursor.i, ns.length - 1)];
+  if (!n.sticky){
+    pushUndo();
+    n.sticky = { text: "", dx: 14, dy: -34 };
+    render();
+  }
+  const ta = document.querySelector(`.sticky[data-sec="${cursor.sec}"][data-i="${Math.min(cursor.i, ns.length - 1)}"] textarea`);
+  if (ta) ta.focus();
+}
+
+// Put each note's sticky over the sheet, after a render has drawn the notes.
+// Positions are worked out in the line's own (unzoomed) coordinates, so they
+// hold at any zoom, in full screen and on a phone alike.
+function placeStickies(){
+  song.sections.forEach((sec, si) => {
+    if (sec.ref) return;
+    sec.notes.forEach((n, i) => {
+      if (!n.sticky) return;
+      const hit = document.querySelector(`.system .hit[data-sec="${si}"][data-i="${i}"]`);
+      const sys = hit && hit.closest(".system");
+      if (!sys) return;
+      const svg = hit.ownerSVGElement, m = hit.getCTM(), b = hit.getBBox();
+      // where the drawing sits in its line (an SVG has no offsetLeft), unzoomed
+      const sr = sys.getBoundingClientRect(), vr = svg.getBoundingClientRect();
+      const zoom = sr.width / sys.offsetWidth || 1;
+      const x = (vr.left - sr.left) / zoom + m.e + b.x * m.a;
+      const y = (vr.top - sr.top) / zoom + m.f + b.y * m.d;
+      const el = document.createElement("div");
+      el.className = "sticky";
+      el.dataset.sec = si; el.dataset.i = i;
+      el.style.left = (x + n.sticky.dx) + "px";
+      el.style.top  = (y + n.sticky.dy) + "px";
+      el.innerHTML = `<div class="grip" title="Drag to move"><button class="x" title="Remove this note">×</button></div>`
+                   + `<textarea placeholder="Note to self…" spellcheck="false"></textarea>`;
+      const ta = el.querySelector("textarea");
+      ta.value = n.sticky.text;
+      ta.addEventListener("input", () => {
+        if (ta.value !== n.sticky.text){ pushUndo(tagFor("sticky")); n.sticky.text = ta.value; persist(); }
+      });
+      el.querySelector(".x").addEventListener("click", () => {
+        pushUndo(); n.sticky = null; render();
+      });
+      // drag by the strip along the top
+      const grip = el.querySelector(".grip");
+      grip.addEventListener("pointerdown", e => {
+        if (e.target.closest(".x")) return;
+        e.preventDefault();
+        grip.setPointerCapture(e.pointerId);
+        // screen pixels → the line's own pixels, whatever the zoom
+        const zoom = sys.getBoundingClientRect().width / sys.offsetWidth || 1;
+        const sx = e.clientX, sy = e.clientY, dx0 = n.sticky.dx, dy0 = n.sticky.dy;
+        let moved = false;
+        const move = ev => {
+          if (!moved){ pushUndo(); moved = true; }
+          n.sticky.dx = dx0 + (ev.clientX - sx) / zoom;
+          n.sticky.dy = dy0 + (ev.clientY - sy) / zoom;
+          el.style.left = (x + n.sticky.dx) + "px";
+          el.style.top  = (y + n.sticky.dy) + "px";
+        };
+        const up = () => {
+          grip.removeEventListener("pointermove", move);
+          grip.removeEventListener("pointerup", up);
+          if (moved) persist();
+        };
+        grip.addEventListener("pointermove", move);
+        grip.addEventListener("pointerup", up);
+      });
+      // the sheet underneath must not take this as a click on the music
+      el.addEventListener("mousedown", e => e.stopPropagation());
+      sys.appendChild(el);
+    });
+  });
+}
+
 /* ---------- typing note names ----------
    The other way in: c d e f g a b instead of a fret. A name has no octave and
    no string, so both are chosen — the octave nearest the note before (within a
@@ -6201,6 +6311,7 @@ document.addEventListener("keydown", e => {
     if (k === "+" || k === "="){ e.preventDefault(); setReadZoom(readZoom + 0.1); return; }
     if (k === "-" || k === "_"){ e.preventDefault(); setReadZoom(readZoom - 0.1); return; }
     if (k === "c" || k === "C"){ e.preventDefault(); toggleReadCols(); return; }
+    if (k === "y" || k === "Y"){ e.preventDefault(); addSticky(); return; }
     if (k === "ArrowLeft" || k === "ArrowRight"){
       e.preventDefault(); stepCursor(k === "ArrowRight" ? 1 : -1, e.shiftKey); return;
     }
@@ -6230,6 +6341,7 @@ document.addEventListener("keydown", e => {
       return;
     }
     if (k === "P"){ e.preventDefault(); togglePractice(); return; }
+    if (k === "y" || k === "Y"){ e.preventDefault(); addSticky(); return; }
     if (k === "f" || k === "F"){ e.preventDefault(); toggleReading(); return; }
     if (k === "ArrowLeft" || k === "ArrowRight"){
       e.preventDefault(); stepCursor(k === "ArrowRight" ? 1 : -1, e.shiftKey); return;
@@ -6324,6 +6436,7 @@ document.addEventListener("keydown", e => {
     case "p":            e.preventDefault(); togglePageBreak(); break;
     case "S":           e.preventDefault(); splitSection(); break;
     case "J":           e.preventDefault(); joinSection(); break;
+    case "y": case "Y": e.preventDefault(); addSticky(); break;
     case "E":           e.preventDefault(); setEntryMode(entryMode === "names" ? "frets" : "names"); break;
     case "(":           e.preventDefault(); toggleSlur(); break;
     case "[":           e.preventDefault(); toggleRepeat("repStart"); break;
@@ -6544,6 +6657,10 @@ $("#editpad").addEventListener("click", e => {
   }
 });
 
+// + Sticky note, in the Note card (Edit) and the Score card (Practice)
+document.querySelector(".sidebar").addEventListener("click", e => {
+  if (e.target.closest("[data-addsticky]")) addSticky();
+});
 document.querySelector(".sidebar").addEventListener("click", e => {
   // Clicking a section in the list selects it. Without this the only way to
   // change section from here was the R button, twice.
