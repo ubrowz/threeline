@@ -295,6 +295,7 @@
     box-shadow:0 10px 32px rgba(0,0,0,.18);
   }
   body.reading .readbar{ display:flex }
+  body.reading.cols2 #rScroll{ display:none }   /* the columns do not run top to bottom */
   .readbar .btn{ padding:9px 15px }
   @media print{ .readbar{ display:none !important } }
 
@@ -688,6 +689,7 @@
           <div><kbd>⌘B</kbd></div><div>click on the beat</div>
           <div><kbd>f</kbd></div><div>full screen, for reading off a stand</div>
           <div><kbd>c</kbd></div><div>in full screen: one column or two</div>
+          <div><kbd>s</kbd></div><div>in full screen: scroll the page at the tempo</div>
           <div><kbd>⇧P</kbd></div><div>practice mode — lock the music</div>
           <div><kbd>esc</kbd></div><div>stop playing</div>
           <div><kbd>w</kbd><kbd>h</kbd><kbd>q</kbd><kbd>e</kbd><kbd>s</kbd></div><div>whole · half · quarter · eighth · 16th</div>
@@ -732,6 +734,7 @@
   <div class="readbar" id="readbar">
     <button class="btn" id="rPlay" title="Play from where you left the cursor, or stop (⌘↵)">Play</button>
     <button class="btn" id="rLoop" title="Keep repeating until you stop (⌘L)">Loop</button>
+    <button class="btn" id="rScroll" title="Scroll the page by itself at the tempo, without playing (s)">Scroll</button>
     <span style="width:4px"></span>
     <button class="btn" id="rOut" title="Smaller (−)">−</button>
     <span class="muted" id="rZoom" style="min-width:46px;text-align:center">140%</span>
@@ -4735,6 +4738,107 @@ function stepEl(step){
     : null;
 }
 
+// Scroll mode: the page moves on by itself at the speed of the music, the way a
+// prompter does, with nothing sounding and no cursor. Each line reaches the
+// reading line (PLAY_LINE) when its first note is due, so a line with more bars
+// in it goes by more slowly. It runs from wherever the page is, and a hand on
+// the page — wheel, drag — moves the music with it rather than fighting it.
+let autoScroll = null;    // { map, t, last, set, raf }
+
+// Time against scroll position: one knot per line, at the moment its first note
+// is due, then the bottom of the last line when the piece ends.
+function scrollMap(){
+  const area = $("#scrollarea");
+  const plan = buildPlan(0, timeline().length - 1);
+  const a = area.getBoundingClientRect();
+  const line = area.clientHeight * PLAY_LINE;
+  const at = y => area.scrollTop + y - a.top - line;
+  const map = [];
+  let sys = null;
+  for (const st of plan.steps){
+    const el = stepEl(st);
+    const s = el && el.closest(".system");
+    if (!s || s === sys) continue;
+    sys = s;
+    const y = at(s.getBoundingClientRect().top);
+    if (map.length && (st.t <= map[map.length-1].t || y <= map[map.length-1].y)) continue;
+    map.push({ t: st.t, y });
+  }
+  if (sys){
+    const y = at(sys.getBoundingClientRect().bottom);
+    if (!map.length || plan.total > map[map.length-1].t) map.push({ t: plan.total, y });
+  }
+  return map.length > 1 ? map : null;
+}
+
+// Before the first line it carries on at the first line's speed, so a title
+// above it goes by in time too; after the last it stays put.
+function scrollYAt(map, t){
+  let k = 1;
+  while (k < map.length - 1 && t > map[k].t) k++;
+  if (t >= map[map.length-1].t) return map[map.length-1].y;
+  const p = map[k-1], q = map[k];
+  return p.y + (t - p.t) * (q.y - p.y) / (q.t - p.t);
+}
+
+function scrollTAt(map, y){
+  let k = 1;
+  while (k < map.length - 1 && y > map[k].y) k++;
+  if (y >= map[map.length-1].y) return map[map.length-1].t;
+  const p = map[k-1], q = map[k];
+  return p.t + (y - p.y) * (q.t - p.t) / (q.y - p.y);
+}
+
+function startAutoScroll(){
+  if (!reading || document.body.classList.contains("cols2")) return;
+  stopAutoScroll();
+  if (isPlaying()) stopPlayback();
+  const area = $("#scrollarea");
+  const map = scrollMap();
+  if (!area || !map) return;
+  // From the very top, start with the first note: if the first line is already
+  // past the reading line, the page waits for the music to catch up with it.
+  const t = area.scrollTop <= 1 ? Math.min(0, scrollTAt(map, 0)) : scrollTAt(map, area.scrollTop);
+  autoScroll = { map, t, last: performance.now(), set: area.scrollTop, raf: 0 };
+  autoScroll.raf = requestAnimationFrame(scrollFrame);
+  updateTransport();
+}
+
+function stopAutoScroll(){
+  if (!autoScroll) return;
+  cancelAnimationFrame(autoScroll.raf);
+  autoScroll = null;
+  updateTransport();
+}
+
+function toggleAutoScroll(){ autoScroll ? stopAutoScroll() : startAutoScroll(); }
+
+function scrollFrame(now){
+  const s = autoScroll;
+  if (!s) return;
+  const area = $("#scrollarea");
+  if (!reading || document.body.classList.contains("cols2")) return stopAutoScroll();
+  if (Math.abs(area.scrollTop - s.set) > 3) s.t = scrollTAt(s.map, area.scrollTop);   // a hand moved it
+  s.t += Math.min(0.1, (now - s.last) / 1000);     // a stalled tab does not leap ahead
+  s.last = now;
+  const most = area.scrollHeight - area.clientHeight;
+  const y = scrollYAt(s.map, s.t);
+  area.scrollTop = Math.max(0, Math.min(y, most));
+  s.set = area.scrollTop;
+  // the end of the piece, or the end of the page: nothing further to scroll
+  if (s.t >= s.map[s.map.length-1].t || y >= most) return stopAutoScroll();
+  s.raf = requestAnimationFrame(scrollFrame);
+}
+
+// The zoom moved every line: measure them again, and stay at the same moment.
+function remapAutoScroll(){
+  if (!autoScroll) return;
+  const map = scrollMap();
+  if (!map) return stopAutoScroll();
+  autoScroll.map = map;
+  autoScroll.set = $("#scrollarea").scrollTop;
+}
+
 function highlightPlaying(step){
   document.querySelectorAll(".system .hit.playing").forEach(e => e.classList.remove("playing"));
   if (!step){ turnedTo = null; return; }
@@ -4805,6 +4909,7 @@ function startPlayback(){
 
   const plan = buildPlan(range[0], range[1]);
   if (!plan.steps.length) return;
+  stopAutoScroll();              // the playhead turns the page itself
 
   const master = ctx.createGain();
   master.gain.setValueAtTime(1, ctx.currentTime);
@@ -4939,6 +5044,7 @@ function setReadZoom(z){
   document.documentElement.style.setProperty("--read-zoom", readZoom);
   const l = $("#rZoom");
   if (l) l.textContent = Math.round(readZoom * 100) + "%";
+  remapAutoScroll();
 }
 
 // As big as the window will take, so it looks right on a laptop and on a
@@ -5031,6 +5137,7 @@ function enterReading(){
 
 function leaveReading(){
   if (!reading) return;
+  stopAutoScroll();
   reading = false;
   document.body.classList.remove("reading", "cols2");
   if (document.fullscreenElement && document.exitFullscreen)
@@ -5207,6 +5314,8 @@ function updateTransport(){
   }
   const rl = $("#rLoop");
   if (rl) rl.classList.toggle("on", loopOn);
+  const rs = $("#rScroll");
+  if (rs) rs.classList.toggle("on", !!autoScroll);
   const sc = $("#loopScope");
   if (sc) sc.textContent = loopScope();
   const pb = $("#btnPractice");
@@ -6378,6 +6487,7 @@ document.addEventListener("keydown", e => {
     if (k === "Escape"){
       e.preventDefault();
       if (isPlaying()) stopPlayback();
+      else if (autoScroll) stopAutoScroll();
       else if (selAnchor !== null){ selAnchor = null; render(); }
       else leaveReading();
       return;
@@ -6390,6 +6500,7 @@ document.addEventListener("keydown", e => {
     if (k === "+" || k === "="){ e.preventDefault(); setReadZoom(readZoom + 0.1); return; }
     if (k === "-" || k === "_"){ e.preventDefault(); setReadZoom(readZoom - 0.1); return; }
     if (k === "c" || k === "C"){ e.preventDefault(); toggleReadCols(); return; }
+    if (k === "s" || k === "S"){ e.preventDefault(); toggleAutoScroll(); return; }
     if (k === "y" || k === "Y"){ e.preventDefault(); addSticky(); return; }
     if (k === "k" || k === "K"){ e.preventDefault(); markSelection(markerColor); return; }
     if (k === "ArrowLeft" || k === "ArrowRight"){
@@ -7315,6 +7426,7 @@ window.addEventListener("blur", closeExportMenu);
 $("#rExit").addEventListener("click", leaveReading);
 $("#rPlay").addEventListener("click", togglePlayback);
 $("#rLoop").addEventListener("click", toggleLoop);
+$("#rScroll").addEventListener("click", toggleAutoScroll);
 $("#rIn").addEventListener("click", () => setReadZoom(readZoom + 0.1));
 $("#rOut").addEventListener("click", () => setReadZoom(readZoom - 0.1));
 $("#rCols").addEventListener("click", toggleReadCols);
