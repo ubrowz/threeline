@@ -4745,29 +4745,63 @@ function stepEl(step){
 // the page — wheel, drag — moves the music with it rather than fighting it.
 let autoScroll = null;    // { map, t, last, set, raf }
 
-// Time against scroll position: one knot per line, at the moment its first note
-// is due, then the bottom of the last line when the piece ends.
+// Where the music goes back — a reference to an earlier section, a repeat sign —
+// or on past what it skipped, the page jumps. When is the trade-off: too early
+// and the end of this line is gone before it is played, too late and the next
+// one is not there to read ahead into. A beat early: only the last note is
+// played from memory, and the next line is up a beat before it is needed. The
+// jump is a short glide rather than a cut, so the eye can see which way it went.
+const JUMP_GLIDE = 0.25;  // seconds
+
+// Time against scroll position, as knots joined by straight lines: one where
+// each line's first note is due, a pair around each jump, and the end of the
+// piece. A line the music comes back to has a knot every time it is played.
 function scrollMap(){
   const area = $("#scrollarea");
   const plan = buildPlan(0, timeline().length - 1);
   const a = area.getBoundingClientRect();
   const line = area.clientHeight * PLAY_LINE;
   const at = y => area.scrollTop + y - a.top - line;
-  const map = [];
-  let sys = null;
+  const page = [...document.querySelectorAll("#page .system")];
+  const top = page.map(s => at(s.getBoundingClientRect().top));
+  const last = page.length - 1;
+  // where the page would be by the time this line is over, without a jump
+  const after = k => k < last ? top[k+1] : at(page[k].getBoundingClientRect().bottom);
+
+  // each stretch of the music on one line, in playing order
+  const visits = [];
   for (const st of plan.steps){
     const el = stepEl(st);
-    const s = el && el.closest(".system");
-    if (!s || s === sys) continue;
-    sys = s;
-    const y = at(s.getBoundingClientRect().top);
-    if (map.length && (st.t <= map[map.length-1].t || y <= map[map.length-1].y)) continue;
-    map.push({ t: st.t, y });
+    const k = el ? page.indexOf(el.closest(".system")) : -1;
+    if (k < 0 || (visits.length && visits[visits.length-1].k === k)) continue;
+    visits.push({ k, t: st.t });
   }
-  if (sys){
-    const y = at(sys.getBoundingClientRect().bottom);
-    if (!map.length || plan.total > map[map.length-1].t) map.push({ t: plan.total, y });
-  }
+  if (!visits.length) return null;
+  const endOf = j => j + 1 < visits.length ? visits[j+1].t : plan.total;
+  const speed = j => {
+    const v = visits[j], d = endOf(j) - v.t;
+    return d > 0 ? (after(v.k) - top[v.k]) / d : 0;
+  };
+  const beat = 60 / ((song.tempo || 90) * playRate);
+
+  const map = [];
+  const add = (t, y, glide) => {
+    const p = map[map.length-1];
+    if (p && t <= p.t) return;
+    map.push(glide ? { t, y, glide } : { t, y });
+  };
+  visits.forEach((v, j) => {
+    add(v.t, top[v.k]);
+    const n = visits[j+1];
+    if (!n || n.k === v.k + 1) return;
+    // land a beat before the next line is due, already moving at its pace
+    const land = Math.max(v.t, n.t - beat);
+    const leave = Math.max(v.t, land - JUMP_GLIDE);
+    add(leave, top[v.k] + speed(j) * (leave - v.t));
+    add(land, top[n.k] - speed(j + 1) * (n.t - land), true);
+  });
+  const v = visits[visits.length-1];
+  add(plan.total, after(v.k));
   return map.length > 1 ? map : null;
 }
 
@@ -4781,12 +4815,28 @@ function scrollYAt(map, t){
   return p.y + (t - p.t) * (q.y - p.y) / (q.t - p.t);
 }
 
-function scrollTAt(map, y){
-  let k = 1;
-  while (k < map.length - 1 && y > map[k].y) k++;
-  if (y >= map[map.length-1].y) return map[map.length-1].t;
-  const p = map[k-1], q = map[k];
-  return p.t + (y - p.y) * (q.t - p.t) / (q.y - p.y);
+// The other way round. With jumps a place on the page can come up more than
+// once — a chorus played three times — so take the time nearest `near`, which
+// is where the music was before the page was moved. A glide is never the answer.
+function scrollTAt(map, y, near){
+  let best = null;
+  const take = t => { if (best === null || Math.abs(t - near) < Math.abs(best - near)) best = t; };
+  const f = map[0], g = map[1];
+  if (y <= f.y && g.y > f.y) take(f.t + (y - f.y) * (g.t - f.t) / (g.y - f.y));
+  for (let k = 1; k < map.length; k++){
+    const p = map[k-1], q = map[k];
+    if (q.glide || q.y === p.y) continue;
+    if (y >= Math.min(p.y, q.y) && y <= Math.max(p.y, q.y))
+      take(p.t + (y - p.y) * (q.t - p.t) / (q.y - p.y));
+  }
+  return best === null ? (y > map[map.length-1].y ? map[map.length-1].t : near) : best;
+}
+
+// Past here the page is at its foot for good: nothing later needs it higher.
+function scrollTail(map, most){
+  let k = map.length - 1;
+  while (k > 0 && map[k-1].y >= most) k--;
+  return map[k].t;
 }
 
 function startAutoScroll(){
@@ -4798,7 +4848,8 @@ function startAutoScroll(){
   if (!area || !map) return;
   // From the very top, start with the first note: if the first line is already
   // past the reading line, the page waits for the music to catch up with it.
-  const t = area.scrollTop <= 1 ? Math.min(0, scrollTAt(map, 0)) : scrollTAt(map, area.scrollTop);
+  const t = area.scrollTop <= 1 ? Math.min(0, scrollTAt(map, 0, -Infinity))
+                                 : scrollTAt(map, area.scrollTop, -Infinity);
   autoScroll = { map, t, last: performance.now(), set: area.scrollTop, raf: 0 };
   autoScroll.raf = requestAnimationFrame(scrollFrame);
   updateTransport();
@@ -4818,15 +4869,16 @@ function scrollFrame(now){
   if (!s) return;
   const area = $("#scrollarea");
   if (!reading || document.body.classList.contains("cols2")) return stopAutoScroll();
-  if (Math.abs(area.scrollTop - s.set) > 3) s.t = scrollTAt(s.map, area.scrollTop);   // a hand moved it
+  if (Math.abs(area.scrollTop - s.set) > 3) s.t = scrollTAt(s.map, area.scrollTop, s.t);   // a hand moved it
   s.t += Math.min(0.1, (now - s.last) / 1000);     // a stalled tab does not leap ahead
   s.last = now;
   const most = area.scrollHeight - area.clientHeight;
   const y = scrollYAt(s.map, s.t);
   area.scrollTop = Math.max(0, Math.min(y, most));
   s.set = area.scrollTop;
-  // the end of the piece, or the end of the page: nothing further to scroll
-  if (s.t >= s.map[s.map.length-1].t || y >= most) return stopAutoScroll();
+  // the end of the piece, or the end of the page with no jump back to come
+  if (s.t >= s.map[s.map.length-1].t || (y >= most && s.t >= scrollTail(s.map, most)))
+    return stopAutoScroll();
   s.raf = requestAnimationFrame(scrollFrame);
 }
 
