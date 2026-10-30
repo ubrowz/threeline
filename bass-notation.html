@@ -149,6 +149,8 @@
   body.practice .locked{ display:flex; order:-2 }
   body.practice .card--play{ order:-1 }
   .card--practice{ display:none }
+  /* Practice's own zoom, in small steps; full screen has its own */
+  body.practice:not(.reading) .page{ zoom:var(--practice-zoom, 1) }
   body.practice .card--practice{ display:block; order:-1 }
   .carryover{
     border:1px solid var(--accent); border-radius:9px;
@@ -390,6 +392,7 @@
     /* fit the fixed 820px page to the screen (see fitSheet) */
     body.narrow:not(.reading) .scrollarea{ padding:12px 10px 90px }
     body.narrow:not(.reading) .page{ zoom:var(--fit-zoom, 1) }
+    body.narrow.practice:not(.reading) .page{ zoom:var(--practice-fit-zoom, 1) }
 
     /* the touch keypad docks under whichever pane is up, in Edit mode only */
     body.narrow:not(.reading):not(.practice) .editpad{
@@ -656,6 +659,11 @@
             <option value="lyrics">Chords + lyrics</option>
           </select>
         </div>
+        <div class="row"><label>Zoom</label>
+          <button class="btn" id="pzOut" title="Smaller, 5% at a time (−)">−</button>
+          <button class="btn" id="pzLabel" style="flex:1" title="Back to 100%">100%</button>
+          <button class="btn" id="pzIn" title="Bigger, 5% at a time (+)">+</button>
+        </div>
         <div class="row"><button class="btn" data-addsticky style="flex:1" title="Pin a yellow note at the cursor. Drag its top strip to move it anywhere; × removes it. Not printed. (y)">+ Sticky note</button></div>
         <div class="row" style="margin-bottom:8px"><label>Marker</label>
           <div class="grid" style="flex:1">
@@ -691,6 +699,7 @@
           <div><kbd>c</kbd></div><div>in full screen: one column or two</div>
           <div><kbd>s</kbd></div><div>in full screen: scroll the page at the tempo</div>
           <div><kbd>⇧P</kbd></div><div>practice mode — lock the music</div>
+          <div><kbd>+</kbd><kbd>−</kbd></div><div>in practice: zoom, 5% at a time</div>
           <div><kbd>esc</kbd></div><div>stop playing</div>
           <div><kbd>w</kbd><kbd>h</kbd><kbd>q</kbd><kbd>e</kbd><kbd>s</kbd></div><div>whole · half · quarter · eighth · 16th</div>
           <div><kbd>.</kbd></div><div>dot</div>
@@ -3047,6 +3056,7 @@ let metroOn = false, countInOn = false;
 let bassSound = "plain";
 let drumFeel = "off";
 let reading = false, readZoom = 1;
+let practiceZoom = 1, fitZoom = 1;      // Practice's own zoom, and the phone's fit
 let readCols = 1, readColsFit = false;   // full screen in one column or two
 let entryMode = "frets";   // Edit: digits are frets, or ("names") letters are note names
 let practice = false;      // the music is fixed; only moving about and playing
@@ -3065,12 +3075,13 @@ function loadPrefs(){
     countInOn = !!p.countIn;
     playRate = Math.max(0.25, Math.min(1, +p.rate || 1));
     readCols = p.cols === 2 ? 2 : 1;
+    practiceZoom = Math.max(PZ_MIN, Math.min(PZ_MAX, +p.zoom || 1));
     entryMode = p.entry === "names" ? "names" : "frets";
   } catch(e){}
 }
 function savePrefs(){
   try { localStorage.setItem(PREF_KEY, JSON.stringify(
-    { loop:loopOn, rate:playRate, metro:metroOn, countIn:countInOn, sound:bassSound, drums:drumFeel, cols:readCols, entry:entryMode })); } catch(e){}
+    { loop:loopOn, rate:playRate, metro:metroOn, countIn:countInOn, sound:bassSound, drums:drumFeel, cols:readCols, entry:entryMode, zoom:practiceZoom })); } catch(e){}
 }
 
 function ac(){
@@ -5175,6 +5186,24 @@ function fitSheet(){
   const z = room >= 820 ? 1
           : Math.max(0.35, Math.round(room / 820 * 20) / 20);
   document.documentElement.style.setProperty("--fit-zoom", z);
+  fitZoom = z;
+  applyPracticeZoom();
+}
+
+// Practice's zoom: 5% at a time, kept between visits. On a phone it scales the
+// page as fitted to the screen, so 100% always means "as wide as it goes".
+const PZ_MIN = 0.5, PZ_MAX = 2;
+function applyPracticeZoom(){
+  const root = document.documentElement.style;
+  root.setProperty("--practice-zoom", practiceZoom);
+  root.setProperty("--practice-fit-zoom", fitZoom * practiceZoom);
+  const l = $("#pzLabel");
+  if (l) l.textContent = Math.round(practiceZoom * 100) + "%";
+}
+function setPracticeZoom(z){
+  practiceZoom = Math.max(PZ_MIN, Math.min(PZ_MAX, Math.round(z * 20) / 20));
+  savePrefs();
+  applyPracticeZoom();
 }
 
 function enterReading(){
@@ -6587,6 +6616,8 @@ document.addEventListener("keydown", e => {
     if (k === "y" || k === "Y"){ e.preventDefault(); addSticky(); return; }
     if (k === "k" || k === "K"){ e.preventDefault(); markSelection(markerColor); return; }
     if (k === "f" || k === "F"){ e.preventDefault(); toggleReading(); return; }
+    if (k === "+" || k === "="){ e.preventDefault(); setPracticeZoom(practiceZoom + 0.05); return; }
+    if (k === "-" || k === "_"){ e.preventDefault(); setPracticeZoom(practiceZoom - 0.05); return; }
     if (k === "ArrowLeft" || k === "ArrowRight"){
       e.preventDefault(); stepCursor(k === "ArrowRight" ? 1 : -1, e.shiftKey); return;
     }
@@ -7482,6 +7513,9 @@ $("#rScroll").addEventListener("click", toggleAutoScroll);
 $("#rIn").addEventListener("click", () => setReadZoom(readZoom + 0.1));
 $("#rOut").addEventListener("click", () => setReadZoom(readZoom - 0.1));
 $("#rCols").addEventListener("click", toggleReadCols);
+$("#pzIn").addEventListener("click", () => setPracticeZoom(practiceZoom + 0.05));
+$("#pzOut").addEventListener("click", () => setPracticeZoom(practiceZoom - 0.05));
+$("#pzLabel").addEventListener("click", () => setPracticeZoom(1));
 $("#fMetro").addEventListener("change", e => setMetro(e.target.checked));
 $("#fSound").addEventListener("change", e => setSound(e.target.value));
 $("#fDrums").addEventListener("change", e => setDrums(e.target.value));
@@ -7654,6 +7688,7 @@ try{
 }catch(e){ /* keep the starting song */ }   // the same migration as a file
 
 loadPrefs();
+applyPracticeZoom();
 
 // Bring back the file this transcription was saved to, if there was one. No
 // permission is asked here — the browser wants a click for that, so it happens
