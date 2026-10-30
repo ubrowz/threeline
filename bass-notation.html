@@ -149,6 +149,7 @@
   body.practice .locked{ display:flex; order:-2 }
   body.practice .card--play{ order:-1 }
   .card--practice{ display:none }
+  body.practice .row--editkey{ display:none }   /* the Score card has it there */
   /* Practice's own zoom, in small steps; full screen has its own */
   body.practice:not(.reading) .page{ zoom:var(--practice-zoom, 1) }
   body.practice .card--practice{ display:block; order:-1 }
@@ -481,6 +482,9 @@
         <div class="row"><label>Tempo</label>
           <input class="fld" type="number" id="fTempo" title="Beats per minute, used when the editor plays the line back" min="30" max="300" step="1" style="flex:0 0 72px">
           <span class="muted">bpm</span>
+        </div>
+        <div class="row row--editkey"><label>Key</label>
+          <select class="fld" id="fKeyEdit" title="Key of the piece. Sets the key signature and how notes are spelled in the standard view, in Practice. Saved with the song; the tab view is unaffected."></select>
         </div>
         <div class="row"><label>Show tempo</label>
           <input type="checkbox" id="fShowTempo" title="Write the tempo on the sheet as well, next to a quarter note" style="flex:0 0 auto;margin:0 6px 0 0">
@@ -7090,7 +7094,9 @@ $("#fNaming").addEventListener("change", e => {
 });
 // Key: metadata only — the key signature and spelling in the standard view.
 // Never re-fingers (contrast #fTuning above); just a redraw.
-$("#fKey").addEventListener("change", e => { pushUndo(); song.key = e.target.value; render(); });
+// Practice has it in the Score card, Edit in the Song card; both are the one key.
+for (const id of ["#fKey", "#fKeyEdit"])
+  $(id).addEventListener("change", e => { pushUndo(); song.key = e.target.value; syncFields(); render(); });
 $("#fNotation").addEventListener("change", e => setNotation(e.target.value));
 $("#fTuning").addEventListener("change", e => {
   const pick = TUNINGS.find(t => t.id === e.target.value);
@@ -7108,8 +7114,7 @@ function syncFields(){
   $("#fTime").value   = sigText(sigAtCursor());
   $("#fBars").value   = song.barsPerLine || "auto";
   $("#fNaming").value = song.naming || "nl";
-  const ksel = $("#fKey");
-  if (ksel){
+  for (const ksel of [$("#fKey"), $("#fKeyEdit")]){
     ksel.innerHTML = KEYS.map(k => `<option value="${k.id}">${esc(k.label)}</option>`).join("");
     ksel.value = song.key || "C";
   }
