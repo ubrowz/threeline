@@ -2451,12 +2451,18 @@ function drawStaffSystem(secIdx, sec, sys, barNo, opts){
     const beamInfo = new Map();
     for (const g of beamGroups(notes, m)){
       if (g.items.length < 2) continue;
-      const score = g.items.reduce((a, it) => a + ((P.get(it.i) ? P.get(it.i).dia : 0) >= 0 ? 1 : -1), 0);
-      const down = score >= 0;
+      // A tied vote goes the way of the note furthest from the middle line, as
+      // engravers do: a D on the line and a low E under the staff beam above.
+      const dias = g.items.map(it => P.get(it.i) ? P.get(it.i).dia : 0);
+      const score = dias.reduce((a, d) => a + (d >= 0 ? 1 : -1), 0);
+      const far = dias.reduce((a, d) => Math.abs(d) > Math.abs(a) ? d : a, 0);
+      const down = score > 0 || (score === 0 && far >= 0);
       const xs = g.items.map(it => mapX(m.x + it.x + it.w/2) + (down ? -ST_HEAD_DX : ST_HEAD_DX));
       const ys = g.items.map(it => P.get(it.i) ? P.get(it.i).y : ST_MID);
-      const beamY = down ? stemEnd(Math.max(...ys), Math.min(...ys), true)
-                         : stemEnd(Math.min(...ys), Math.max(...ys), false);
+      // measured from the note nearest the beam, and never closer to it than a
+      // short stem — or a note far off the staff ends up sitting on the beam
+      const beamY = down ? stemEnd(Math.max(...ys), Math.max(...ys), true)
+                         : stemEnd(Math.min(...ys), Math.min(...ys), false);
       const xL = Math.min(xs[0], xs[xs.length-1]), xR = Math.max(xs[0], xs[xs.length-1]);
       s += `<rect x="${xL}" y="${beamY - 1.25}" width="${xR - xL}" height="2.5" fill="#2a2e35"/>`;
       const inner = down ? beamY - 5 : beamY + 5;
