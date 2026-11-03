@@ -110,11 +110,20 @@
     background:transparent; color:inherit; font:inherit; padding:5px 7px; outline:none;
   }
   @media print{ .sticky{ display:none !important } }
-  .section.ref{break-inside:avoid;page-break-inside:avoid}
-  .reftag{
-    display:block;margin:-3px 0 0 -5px;font-size:10px;font-weight:600;
-    letter-spacing:.09em;text-transform:uppercase;color:#a6adb7;
+  /* References in a row: a run of them shares a line, wrapping when it is full,
+     instead of a heading each down the page. */
+  .refrow{
+    display:flex; flex-wrap:wrap; align-items:baseline; column-gap:26px; row-gap:2px;
+    margin:0 0 26px; break-inside:avoid; page-break-inside:avoid;
   }
+  .refrow .section{ margin:0; display:flex; align-items:baseline; gap:6px }
+  .refrow .sectionhead{ width:auto; margin-bottom:0 }   /* sized to the name: fitRefHeads */
+  .reftag{
+    font-size:10px;font-weight:600;
+    letter-spacing:.09em;text-transform:uppercase;color:#a6adb7;white-space:nowrap;
+  }
+  /* only the editor needs telling; the player reads the names */
+  body.practice .reftag, body.reading .reftag{ display:none }
   @media print{ .reftag{display:none} }
 
   /* A manual page break. On screen it is only a marker; the actual break
@@ -2792,13 +2801,25 @@ function render(){
   staffClef = notation === "treble" ? "treble" : "bass";
   const lyricView = practice && notation === "lyrics";
 
+  // A run of references shares one row; a page break on one starts a new row.
+  let inRefRow = false;
+  const closeRefRow = () => { if (inRefRow){ html += `</div>`; inRefRow = false; } };
+
   song.sections.forEach((sec, si) => {
     if (sec.ref){
-      html += `<div class="section ref${sec.pageBrk ? " pagebreak" : ""}" data-sec="${si}">`
-           +  `<input class="sectionhead" data-sechead="${si}" value="${esc(sec.heading)}" placeholder="e.g. Chorus" title="Which earlier section this one repeats. Type the same name.">`
+      if (sec.pageBrk) closeRefRow();
+      if (!inRefRow){
+        html += `<div class="refrow${sec.pageBrk ? " pagebreak" : ""}">`;
+        inRefRow = true;
+      }
+      html += `<div class="section ref" data-sec="${si}">`
+           +  `<input class="sectionhead" data-sechead="${si}" value="${esc(sec.heading)}" placeholder="e.g. Chorus" `
+           +  `${musicLocked() ? "readonly " : ""}`
+           +  `title="Which earlier section this one repeats. Type the same name.">`
            +  `<span class="reftag">name only</span></div>`;
       return;
     }
+    closeRefRow();
 
     const showLyrics = sec.notes.some(n => n.lyric);
     const showChords = sec.notes.some(n => n.chord);
@@ -2835,8 +2856,10 @@ function render(){
     });
     html += `</div>`;
   });
+  closeRefRow();
 
   page.innerHTML = html;
+  fitRefHeads();
   placeStickies();
   renderSidebar();
   renderStatus();
@@ -6816,9 +6839,25 @@ $("#page").addEventListener("input", e => {
     song.sections[+i].heading = e.target.value;
     const mirror = document.querySelector(`[data-sechead2="${i}"]`);
     if (mirror) mirror.value = e.target.value;
+    if (e.target.closest(".refrow")) fitRefHead(e.target);
     persist();
   }
 });
+
+// A text box does not grow with what is typed in it, so a reference's name is
+// measured and the box made to fit — or a row of them would each take a width
+// meant for the longest name anyone might type.
+let refMeasure = null;
+function fitRefHead(el){
+  const cs = getComputedStyle(el);
+  const ctx = refMeasure || (refMeasure = document.createElement("canvas").getContext("2d"));
+  ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  const text = (el.value || el.placeholder).toUpperCase();
+  const spacing = (parseFloat(cs.letterSpacing) || 0) * text.length;
+  const pad = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + 2 + 4;
+  el.style.width = Math.ceil(ctx.measureText(text).width + spacing + pad) + "px";
+}
+function fitRefHeads(){ document.querySelectorAll(".refrow .sectionhead").forEach(fitRefHead); }
 
 // render() rebuilds the inspector, which would drop focus after the first
 // keystroke in a text field — so put the caret back where it was.
@@ -6840,7 +6879,10 @@ document.querySelector(".sidebar").addEventListener("input", e => {
     pushUndo("heading" + d.sechead2);
     song.sections[+d.sechead2].heading = e.target.value;
     const mirror = document.querySelector(`[data-sechead="${d.sechead2}"]`);
-    if (mirror) mirror.value = e.target.value;
+    if (mirror){
+      mirror.value = e.target.value;
+      if (mirror.closest(".refrow")) fitRefHead(mirror);
+    }
     persist();
     return;
   }
