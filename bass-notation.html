@@ -1608,6 +1608,26 @@ function barsPerLine(){
   return (v && v !== "auto") ? +v : 0;
 }
 
+// The narrowest a bar in the Chords grid can be with its chord names clear of
+// each other and of the barlines. One chord is centred in the bar; several sit
+// over their notes, which squeeze evenly, so the tightest gap sets the scale.
+// Sizes as drawChordSystem sets them.
+const GRID_CHORD_ONE  = "700 15px system-ui,-apple-system,sans-serif";
+const GRID_CHORD_MANY = "700 12.5px system-ui,-apple-system,sans-serif";
+function chordGridMinW(notes, items, w, repL, repR){
+  const AIR = 7;
+  const named = items.filter(it => notes[it.i].chord);
+  if (!named.length) return 0;
+  if (named.length === 1)
+    return Math.min(CONTENT_W, textW(notes[named[0].i].chord, GRID_CHORD_ONE) + 2 * (AIR + Math.max(repL, repR)));
+  const cells = named.map(it => ({ cx: it.x + it.w / 2, half: textW(notes[it.i].chord, GRID_CHORD_MANY) / 2 }));
+  const first = cells[0], last = cells[cells.length - 1];
+  let scale = Math.max((first.half + AIR + repL) / first.cx, (last.half + AIR + repR) / (w - last.cx));
+  for (let k = 1; k < cells.length; k++)
+    scale = Math.max(scale, (cells[k - 1].half + cells[k].half + AIR) / (cells[k].cx - cells[k - 1].cx));
+  return Math.min(CONTENT_W, w * scale);
+}
+
 // → [{ measures:[{items:[{i,x,w}], x, w}], width }]
 // forceBpl overrides the song's bars-per-line — the Chords view packs wider.
 function layoutSection(sec, forceBpl){
@@ -1641,7 +1661,10 @@ function layoutSection(sec, forceBpl){
       const ly = notes[it.i].lyric;
       if (ly) minScale = Math.max(minScale, (textW(ly, FONT_LYRIC) + 8) / it.w);
     }
-    return { items, w, minW: w * Math.min(1, minScale), x: 0, first,
+    const minW = forceBpl
+      ? chordGridMinW(notes, items, w, flags && flags.repStart ? REPEAT_W : 0, flags && flags.repEnd ? REPEAT_W : 0)
+      : w * Math.min(1, minScale);
+    return { items, w, minW, x: 0, first,
              sig:m.sig, showSig, sigX: padL - sigW / 2 };
   });
 
