@@ -343,13 +343,24 @@
     .topbar,.sidebar,.statusbar{display:none !important}
     .main,.app{display:block;height:auto}
     .scrollarea{overflow:visible;padding:0}
-    .page{width:auto;box-shadow:none;padding:0;margin:0;border-radius:0}
+    /* !important: Practice's zoom and Reading's two columns must not reach the paper. */
+    .page{width:auto !important;zoom:1 !important;column-count:auto !important;
+          box-shadow:none;padding:0 !important;margin:0;border-radius:0}
+    /* Every system runs margin to margin, whatever the paper. */
+    .system svg{width:100%;height:auto}
     .sectionhead{border-color:transparent !important}
     .pagebreak{margin-top:0}
     .pagebreak::before{display:none}
     .system .sel{display:none}
     .system .selbg{fill:#fff}
     @page{margin:16mm 12mm}
+  }
+  /* The print dialog can turn the page without telling the script, so a wider
+     copy of the score is laid out in advance and the paper picks (preparePrint). */
+  #printLandscape{display:none}
+  @media print and (orientation:landscape){
+    #page{display:none}
+    #printLandscape{display:block}
   }
 
   /* ---------- narrow / touch screens: one pane at a time ---------- */
@@ -1340,7 +1351,7 @@ function clampCursor(){
 
 const PAGE_W    = 820;
 const PAD_X     = 40;
-const CONTENT_W = PAGE_W - PAD_X * 2;   // 740
+let CONTENT_W = PAGE_W - PAD_X * 2;     // 740; wider only while laying out a landscape print
 
 let HEAD_Y        = 46;   // rhythm note-head centre line
 let STEM_TOP      = 21;
@@ -2786,7 +2797,19 @@ function render(){
   $("#fOct").disabled = !showNames();   // with no name row, octaves have nothing to show on
   const tf = $("#fTime");                // the metre shown is the one at the cursor
   if (tf && document.activeElement !== tf) tf.value = sigText(sigAtCursor());
-  const page = $("#page");
+  $("#page").innerHTML = scoreHtml();
+  fitRefHeads();
+  placeStickies();
+  renderSidebar();
+  renderStatus();
+  updateTransport();     // the loop readout follows the cursor and the selection
+  const pd = $("#padDur");
+  if (pd) pd.textContent = (curNote() || entry).dur;
+  persist();
+}
+
+// The whole score as HTML, laid out at the current CONTENT_W.
+function scoreHtml(){
   let html = "";
 
   html += `<div class="songhead"><div class="t">${esc(song.title || "Untitled")}</div>`;
@@ -2857,16 +2880,7 @@ function render(){
     html += `</div>`;
   });
   closeRefRow();
-
-  page.innerHTML = html;
-  fitRefHeads();
-  placeStickies();
-  renderSidebar();
-  renderStatus();
-  updateTransport();     // the loop readout follows the cursor and the selection
-  const pd = $("#padDur");
-  if (pd) pd.textContent = (curNote() || entry).dur;
-  persist();
+  return html;
 }
 
 // Worked example for whichever octave convention is selected, computed through
@@ -7478,6 +7492,25 @@ $("#fileInput").addEventListener("change", e => {
 $("#btnSave").addEventListener("click", () => saveFile(false));
 $("#btnSaveAs").addEventListener("click", () => saveFile(true));
 $("#btnPrint").addEventListener("click", () => { stopPlayback(); window.print(); });
+
+// Landscape paper holds more bars to a line, not just bigger ones, so it gets a
+// layout of its own: about the printable width of A4 or Letter turned sideways,
+// the small difference between the two being taken up by the SVG's scaling.
+// beforeprint, so that Cmd/Ctrl+P gets it too.
+const PRINT_LANDSCAPE_W = 1000;
+function preparePrint(){
+  clearPrint();
+  const portraitW = CONTENT_W, copy = document.createElement("div");
+  copy.id = "printLandscape";
+  copy.className = "page";
+  CONTENT_W = PRINT_LANDSCAPE_W;
+  try { copy.innerHTML = scoreHtml(); } finally { CONTENT_W = portraitW; }
+  $("#page").after(copy);
+  fitRefHeads();
+}
+function clearPrint(){ const c = $("#printLandscape"); if (c) c.remove(); }
+addEventListener("beforeprint", preparePrint);
+addEventListener("afterprint", clearPrint);
 // The browser's own tooltip takes about a second and cannot be read at a
 // glance. This shows the same text sooner, holding the title off the element
 // while it is up so the native one does not appear underneath.
