@@ -1531,7 +1531,7 @@ function noteWidth(notes, i){
   }
   if (n.link) w += 7;              // room for the h / p / slide mark between notes
   if (n.lyric) w = Math.max(w, textW(n.lyric, FONT_LYRIC) + 8);
-  if (n.chord) w = Math.max(w, textW(n.chord, FONT_CHORD) + 10);
+  if (n.chord) w = Math.max(w, textW(n.chord, practice && notation === "lyrics" ? FONT_GRID_CHORD : FONT_CHORD) + 10);
   return w;
 }
 
@@ -1611,16 +1611,14 @@ function barsPerLine(){
 // The narrowest a bar in the Chords grid can be with its chord names clear of
 // each other and of the barlines. One chord is centred in the bar; several sit
 // over their notes, which squeeze evenly, so the tightest gap sets the scale.
-// Sizes as drawChordSystem sets them.
-const GRID_CHORD_ONE  = "700 15px system-ui,-apple-system,sans-serif";
-const GRID_CHORD_MANY = "700 12.5px system-ui,-apple-system,sans-serif";
+const FONT_GRID_CHORD = "700 15px system-ui,-apple-system,sans-serif";
 function chordGridMinW(notes, items, w, repL, repR){
   const AIR = 7;
   const named = items.filter(it => notes[it.i].chord);
   if (!named.length) return 0;
   if (named.length === 1)
-    return Math.min(CONTENT_W, textW(notes[named[0].i].chord, GRID_CHORD_ONE) + 2 * (AIR + Math.max(repL, repR)));
-  const cells = named.map(it => ({ cx: it.x + it.w / 2, half: textW(notes[it.i].chord, GRID_CHORD_MANY) / 2 }));
+    return Math.min(CONTENT_W, textW(notes[named[0].i].chord, FONT_GRID_CHORD) + 2 * (AIR + Math.max(repL, repR)));
+  const cells = named.map(it => ({ cx: it.x + it.w / 2, half: textW(notes[it.i].chord, FONT_GRID_CHORD) / 2 }));
   const first = cells[0], last = cells[cells.length - 1];
   let scale = Math.max((first.half + AIR + repL) / first.cx, (last.half + AIR + repR) / (w - last.cx));
   for (let k = 1; k < cells.length; k++)
@@ -2773,7 +2771,7 @@ function drawChordSystem(secIdx, sec, sys, barNo, opts){
     }
     if (lyrics){
       for (const c of cells)
-        s += `<text x="${c.cx}" y="${midY}" text-anchor="middle" font-size="13.5" font-weight="700" `
+        s += `<text x="${c.cx}" y="${midY}" text-anchor="middle" font-size="15" font-weight="700" `
            + `font-family="system-ui,-apple-system,sans-serif" fill="#1b1d21">${esc(c.chord)}</text>`;
       if (!cells.length && !words)
         s += `<circle cx="${m.x + m.w / 2}" cy="${ROW_H / 2}" r="1.6" fill="#c9ccd2"/>`;
@@ -2784,7 +2782,7 @@ function drawChordSystem(secIdx, sec, sys, barNo, opts){
          + `font-family="system-ui,-apple-system,sans-serif" fill="#1b1d21">${esc(cells[0].chord)}</text>`;
     } else {
       for (const c of cells)
-        s += `<text x="${c.cx}" y="${midY}" text-anchor="middle" font-size="12.5" font-weight="700" `
+        s += `<text x="${c.cx}" y="${midY}" text-anchor="middle" font-size="15" font-weight="700" `
            + `font-family="system-ui,-apple-system,sans-serif" fill="#1b1d21">${esc(c.chord)}</text>`;
     }
   }
