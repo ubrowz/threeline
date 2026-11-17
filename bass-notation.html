@@ -216,6 +216,8 @@
   .fld:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
   textarea.fld{width:100%;resize:vertical;line-height:1.5;font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12.5px}
   .grid{display:flex;gap:5px;flex-wrap:wrap}
+  .tpback{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;font-size:12.5px}
+  .tpback[hidden]{display:none}
   .grid .btn{padding:5px 0;flex:1;min-width:42px;text-align:center}
   .glyphbtn{font-size:17px;line-height:1}
   .muted{color:var(--ink-2);font-size:12px}
@@ -609,7 +611,11 @@
           <button class="btn" id="btnShiftDown" title="The whole song one fret lower">− 1 fret</button>
           <button class="btn" id="btnShiftUp" title="The whole song one fret higher">+ 1 fret</button>
         </div>
-        <div class="muted" style="margin-top:7px">The whole song, a fret at a time, on the strings it is on. Chords and key move with it. A note that would leave the neck goes to another string, or an octave over if no string can reach it.</div>
+        <div class="tpback" id="tpBack" hidden>
+          <span id="tpState"></span>
+          <button class="btn" id="btnShiftHome" title="Undo all transposing: every note, chord and the key as they were written">Back to original</button>
+        </div>
+        <div class="muted" style="margin-top:7px">The whole song, a fret at a time, on the strings it is on. Chords and key move with it. A note that would leave the neck goes to another string, or an octave over if no string can reach it. Transposing back restores the original exactly.</div>
       </div>
 
       <div class="card">
@@ -1189,11 +1195,21 @@ function retune(next){
 // or the 24th fret moves to the string where that pitch sits nearest to where
 // the hand would have been; only a pitch no string reaches moves an octave.
 // Chord symbols and the key go with it, so the changes still fit the notes.
+//
+// Reversible: song.shift is how far the song now sits from where it was written,
+// and each note keeps its original in n.home — fingering, spelling, chord. Every
+// transpose is worked out from that original by the total, never from the last
+// step, so whatever a step had to change (a string, an octave, a dropped voice)
+// comes back exactly when the total returns to it. A note edited since keeps the
+// edit: `out` records what transposing left, and a note that no longer matches
+// it takes its present state as its new original, at the shift it was made at.
+const gripPrint = n => JSON.stringify([n.rest, n.rest ? [] : gripVoices(n), n.spell, n.chord]);
 function transposeSong(by){
   const t = tuning(), lo = t[0], hi = t[t.length - 1] + 24;
   const tally = { string:0, octave:0, dropped:0 };
+  const from = song.shift | 0, to = from + by;
 
-  const place = (v, taken) => {
+  const place = (v, taken, by) => {
     const want = v.fret + by;
     if (want >= 0 && want <= 24 && !taken.has(v.string)) return { string:v.string, fret:want };
     let midi = voiceMidi(v) + by, over = 0;      // an octave moves where the hand aims too
@@ -1214,29 +1230,33 @@ function transposeSong(by){
   };
 
   // the key, by its tonic; of two spellings of the same key the one with fewer
-  // accidentals, and on the tie (F#/Gb) the one in the direction of travel
+  // accidentals, and on the tie (F#/Gb) the one in the direction of travel.
+  // Like the notes, from the key the song was written in.
+  if (!song.keyHome || song.keyHome.out !== song.key) song.keyHome = { at: from, key: song.key };
+  const kd = to - song.keyHome.at;
   const tonic = f => ((f * 7) % 12 + 12) % 12;
-  const pc = (tonic(keyFifths()) + by % 12 + 12) % 12;
-  const key = KEYS.filter(k => tonic(k.fifths) === pc)
-    .sort((a, b) => Math.abs(a.fifths) - Math.abs(b.fifths) || (by > 0 ? b.fifths - a.fifths : a.fifths - b.fifths))[0];
+  const homeKey = KEYS.find(k => k.id === song.keyHome.key) || KEYS.find(k => k.id === "C");
+  const pc = (tonic(homeKey.fifths) + kd % 12 + 12) % 12;
+  const key = kd === 0 ? homeKey : KEYS.filter(k => tonic(k.fifths) === pc)
+    .sort((a, b) => Math.abs(a.fifths) - Math.abs(b.fifths) || (kd > 0 ? b.fifths - a.fifths : a.fifths - b.fifths))[0];
 
   const prefer = key.fifths > 0 ? "sharp" : key.fifths < 0 ? "flat" : "def";
   // A root keeps its own language: Bes stays Dutch, Bb English; a plain letter
   // takes the song's.
-  const spell = (name, rootPc) => {
+  const spell = (name, rootPc, by) => {
     const lang = /^(As|Es)$|[ie]s$/.test(name) ? "nl" : /^[A-H][#b]$/.test(name) ? "en"
                : (NAMING[song.naming] ? song.naming : "nl");
     return NAMING[lang][prefer][((rootPc + by) % 12 + 12) % 12];
   };
-  const shiftChord = sym => {
+  const shiftChord = (sym, by) => {
     const c = parseChord(sym);
     if (!c) return sym;                           // N.C., or anything not read as a chord
     const [head, ...over] = sym.split("/");
     const lead = head.match(/^\s*/)[0];
-    let out = lead + spell(c.rootName, c.rootPc) + head.slice(lead.length + c.rootName.length);
+    let out = lead + spell(c.rootName, c.rootPc, by) + head.slice(lead.length + c.rootName.length);
     if (over.length){
       const b = matchRoot(over[0].trim());
-      out += "/" + (b ? over[0].replace(b[0], spell(b[0], b[1])) : over[0]);
+      out += "/" + (b ? over[0].replace(b[0], spell(b[0], b[1], by)) : over[0]);
       if (over.length > 1) out += "/" + over.slice(1).join("/");
     }
     return out;
@@ -1245,29 +1265,48 @@ function transposeSong(by){
   pushUndo();
   for (const sec of song.sections){
     for (const n of sec.notes){
-      if (n.chord) n.chord = shiftChord(n.chord);
-      if (n.rest) continue;
-      const taken = new Set(), voices = [];
-      for (const v of gripVoices(n)){
-        const r = place(v, taken);
-        if (!r){ tally.dropped++; continue; }
-        taken.add(r.string); voices.push(r);
+      let h = n.home;
+      if (!h || h.out !== gripPrint(n) || !Array.isArray(h.stack) || [h.string, ...h.stack.map(v => v.string)].some(x => x >= t.length))
+        h = n.home = { at: from, string: n.string, fret: n.fret, stack: n.stack.map(v => ({ ...v })),
+                       spell: n.spell, chord: n.chord };
+      const d = to - h.at;
+      if (d === 0){                               // back where it was written: exactly that
+        n.string = h.string; n.fret = h.fret; n.stack = h.stack.map(v => ({ ...v }));
+        n.spell = h.spell; n.chord = h.chord;
+        delete n.home;
+        continue;
       }
-      setGrip(n, voices);
+      n.chord = h.chord ? shiftChord(h.chord, d) : h.chord;
+      if (!n.rest){
+        const taken = new Set(), voices = [];
+        for (const v of [{ string: h.string, fret: h.fret }, ...h.stack]){
+          const r = place(v, taken, d);
+          if (!r){ tally.dropped++; continue; }
+          taken.add(r.string); voices.push(r);
+        }
+        setGrip(n, voices);
+      }
+      h.out = gripPrint(n);
     }
   }
   song.key = key.id;
+  if (to === 0){ delete song.shift; delete song.keyHome; }
+  else { song.shift = to; song.keyHome.out = key.id; }
   syncFields();
   render();
 
   const notes = k => k + " note" + (k === 1 ? "" : "s");
   const bits = [];
-  if (tally.string)  bits.push(notes(tally.string) + " moved to another string");
-  if (tally.octave)  bits.push(notes(tally.octave) + " moved an octave to stay on the neck");
-  if (tally.dropped) bits.push(notes(tally.dropped) + " of a double stop dropped, with no string left to put it on");
-  say("Shifted " + (by > 0 ? "up " : "down ") + Math.abs(by) + " fret" + (Math.abs(by) === 1 ? "" : "s")
-      + (bits.length ? " — " + bits.join(", ") + "." : "."));
+  if (tally.string)  bits.push(notes(tally.string) + " on another string");
+  if (tally.octave)  bits.push(notes(tally.octave) + " an octave over to stay on the neck");
+  if (tally.dropped) bits.push(notes(tally.dropped) + " of a double stop left out, with no string to put it on");
+  say(to === 0 ? "Back to the original."
+    : "Shifted " + (by > 0 ? "up " : "down ") + Math.abs(by) + " fret" + (Math.abs(by) === 1 ? "" : "s")
+      + " — " + shiftText(to) + " the original"
+      + (bits.length ? "; against it, " + bits.join(", ") + "." : ".")
+      + " Transposing back restores it exactly.");
 }
+const shiftText = k => Math.abs(k) + " fret" + (Math.abs(k) === 1 ? "" : "s") + (k > 0 ? " above" : " below");
 
 function nameOf(n){
   const m = midiOf(n), pc = ((m % 12) + 12) % 12;
@@ -2914,6 +2953,9 @@ function octHint(){
 }
 
 function renderSidebar(){
+  const sh = song.shift | 0;
+  $("#tpBack").hidden = !sh;
+  if (sh) $("#tpState").textContent = shiftText(sh) + " the original";
   const jb = $("#btnJoinSection");
   if (jb) jb.disabled = !canJoinSection();
   $("#btnTypeFrets").classList.toggle("on", entryMode === "frets");
@@ -7134,6 +7176,7 @@ $("#btnTypeFrets").addEventListener("click", () => setEntryMode("frets"));
 $("#btnTypeNames").addEventListener("click", () => setEntryMode("names"));
 $("#btnShiftUp").addEventListener("click", () => transposeSong(+1));
 $("#btnShiftDown").addEventListener("click", () => transposeSong(-1));
+$("#btnShiftHome").addEventListener("click", () => { if (song.shift) transposeSong(-song.shift); });
 
 /* ---------- song fields ---------- */
 $("#fTitle").addEventListener("input", e => { pushUndo("title"); song.title = e.target.value; render(); });
@@ -7476,6 +7519,8 @@ function loadSong(obj){
     // honour whatever the file recorded — including the old on/off flag —
     // and fall back to the default only when it says nothing at all
     octaves: obj.octaves || ("showOctave" in obj ? (obj.showOctave ? "spn" : "off") : DEFAULT_OCTAVES),
+    // how far it has been transposed from where it was written; see transposeSong
+    ...((obj.shift | 0) ? { shift: obj.shift | 0, keyHome: obj.keyHome || null } : {}),
     sections: obj.sections.map(s => ({
       heading: s.heading || "",
       ref: !!s.ref,
