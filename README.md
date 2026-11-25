@@ -8,7 +8,7 @@ sits on the neck, and what it is called.
 The two files that get served:
 
 - `index.html` — the landing page
-- `bass-notation.html` — the editor itself, 338 KB
+- `bass-notation.html` — the editor itself, 918 KB
 
 The editor is self-contained and works offline. Transcriptions are saved as
 plain `.json` on your own machine; nothing is uploaded anywhere.
@@ -16,7 +16,13 @@ plain `.json` on your own machine; nothing is uploaded anywhere.
 ## Working on it
 
 `bass-notation.html` is the editor and is edited directly — it has no build step
-and no dependencies. Open it in a browser and it runs.
+and nothing to install. Open it in a browser and it runs.
+
+The one outside piece is [VexFlow](https://github.com/0xfe/vexflow) 4.2.2 (MIT;
+its Bravura glyphs are under the SIL Open Font License), embedded unmodified in
+its own `<script>` with both licences above it. It draws only the Staff + TAB
+view in Practice (`drawVexSystem`); everything else is Threeline's own SVG. It is
+the `vexflow-bravura.js` build from npm, about 560 KB of the editor's size.
 
 `index.html` is generated. It embeds its images and notation so that it is a
 single file with no external requests, which makes the built page unreadable, so
