@@ -728,6 +728,7 @@
           <div><kbd>f</kbd></div><div>full screen, for reading off a stand</div>
           <div><kbd>c</kbd></div><div>in full screen: one column or two</div>
           <div><kbd>s</kbd></div><div>in full screen: scroll the page at the tempo</div>
+          <div><kbd>pgdn</kbd> <kbd>pgup</kbd></div><div>in full screen and Practice: half a page down / up — also <kbd>↓</kbd> <kbd>↑</kbd>. A Bluetooth page-turn pedal works if set to send these keys (not ← →, which move between notes)</div>
           <div><kbd>⇧P</kbd></div><div>practice mode — lock the music</div>
           <div><kbd>+</kbd><kbd>−</kbd></div><div>in practice: zoom, 5% at a time</div>
           <div><kbd>esc</kbd></div><div>stop playing</div>
@@ -6698,6 +6699,11 @@ document.addEventListener("keydown", e => {
       e.preventDefault(); stepCursor(k === "ArrowRight" ? 1 : -1, e.shiftKey); return;
     }
     if (k === " "){ e.preventDefault(); moveCursor(+1); return; }
+    // A Bluetooth page-turn pedal is a keyboard with two keys, usually set to
+    // PageDown / PageUp or ↓ / ↑ — so those turn half a page, like Space in
+    // Practice, rather than the browser's whole-screen jump.
+    if (k === "PageDown" || k === "ArrowDown"){ e.preventDefault(); scrollHalfPage(+1); return; }
+    if (k === "PageUp" || k === "ArrowUp"){ e.preventDefault(); scrollHalfPage(-1); return; }
     return;                                            // everything else writes
   }
 
@@ -6734,6 +6740,9 @@ document.addEventListener("keydown", e => {
     // Space turns half a page, like a reader's page turn; ⇧Space goes back.
     // The arrows still step through the notes.
     if (k === " "){ e.preventDefault(); scrollHalfPage(e.shiftKey ? -1 : 1); return; }
+    // The same for a page-turn pedal, as in full screen.
+    if (k === "PageDown" || k === "ArrowDown"){ e.preventDefault(); scrollHalfPage(+1); return; }
+    if (k === "PageUp" || k === "ArrowUp"){ e.preventDefault(); scrollHalfPage(-1); return; }
     return;                                     // everything else writes
   }
 
